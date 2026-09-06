@@ -278,10 +278,11 @@ describe('sleep in place, on a real dev canvas', () => {
     bake.targets[0].texture = 'gone.png'
     writeFileSync(meta, JSON.stringify(bake))
     await reloadGlass()
-    await wait(3000)
-    expect(await ev(ASLEEP('app/glass'))).toBe(true)     // the pause
-    expect(await ev(TEXTURES('app/glass'))).toBe(0)      // no glass overridden
+    await until(ASLEEP('app/glass'))                                       // the pause
+    expect(await ev(TEXTURES('app/glass'))).toBe(0)                        // no glass overridden
     expect(await ev(`${DOC('app/glass')}.getElementById('mv-sleep').textContent.includes('url(')`)).toBe(false)
+    await wait(1500)
+    expect(await ev(TEXTURES('app/glass'))).toBe(0)                        // and it stays that way
     writeFileSync(meta, original)
   })
 

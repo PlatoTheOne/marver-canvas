@@ -935,8 +935,8 @@ export function CommentsController() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  // broadcast pick mode to every LIVE frame (laser rides along inside the bridge). Scoped to
-  // .sh-live so the lean cover (.sh-lean, a scriptless snapshot) is never messaged.
+  // broadcast pick mode to every frame (laser rides along inside the bridge); a sleeping frame
+  // is the live document itself, so it is messaged like any other
   useEffect(() => {
     for (const f of document.querySelectorAll('iframe.sh-live'))
       (f as HTMLIFrameElement).contentWindow?.postMessage({ type: 'sh:pick', on: commentMode, quiet: !ctlShowAnchor }, location.origin)
