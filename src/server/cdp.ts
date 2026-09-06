@@ -38,7 +38,9 @@ export const PROFILE_PREFIXES = ['mv-shot-', 'mv-browser-']
 // start AND ~0.5s per new tab (renderer spawns serialised behind it). Without it the GPU
 // process composites, tabs open in ~45ms, and on a machine with no GPU Chrome falls back to
 // software by itself. Measured 2026-09-04; the PNGs differ only in edge antialiasing.
-const FLAGS = ['--headless=new', '--hide-scrollbars', '--no-first-run', '--no-default-browser-check', '--disable-extensions']
+// MV_CHROME_FLAGS adds flags; MV_CHROME_HEADED=1 opens a real window (a research switch: a display and
+// its vsync are the only way to measure what a person sees during a pan).
+const FLAGS = [...(process.env.MV_CHROME_HEADED ? [] : ['--headless=new']), '--hide-scrollbars', '--no-first-run', '--no-default-browser-check', '--disable-extensions', ...(process.env.MV_CHROME_FLAGS?.split(' ').filter(Boolean) ?? [])]
 const HANDSHAKE_MS = 15_000
 const MAX_MESSAGE = 1 << 30   // a screenshot answer is hundreds of MB of base64 at most; past this it is a runaway
 
@@ -51,7 +53,8 @@ type Pending = { owner: object | undefined; resolve: (r: any) => void; reject: (
 export class Frames {
   private chunks: Buffer[] = []
   private held = 0
-  constructor(private readonly max = MAX_MESSAGE) {}
+  private readonly max: number
+  constructor(max = MAX_MESSAGE) { this.max = max }
   /** Feed one chunk; returns the complete messages it finished, or throws on a runaway. */
   push(d: Buffer): string[] {
     const out: string[] = []

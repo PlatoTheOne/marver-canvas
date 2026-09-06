@@ -54,6 +54,11 @@ export interface Node {
   /** Renavigation nonce: bumped when the shell wants this iframe on a FRESH URL
    *  (errored frame whose file is back in the manifest). Never persisted. */
   nav?: number
+  /** Source revision: bumped when the frame reports an HMR update (its modules changed without a
+   *  navigation). Never persisted. */
+  rev?: number
+  /** The theme the frame reports as APPLIED (sh:theme-applied) - sleep waits for it to match. */
+  themeOn?: string
   /** Explicit per-frame override, set by scoped theme actions; cleared by a global set.
    *  The only theme value that persists into the board file. */
   themeUser?: string
@@ -302,6 +307,8 @@ interface State {
   resizeNode(key: string, w: number, h: number): void
   measureNode(key: string, frameId: string, ownWidth: number, measuredWidth: number, height: number): void
   setStatus(key: string, status: Node['status'], error?: string): void
+  bumpRev(key: string): void
+  setThemeOn(key: string, theme: string): void
   reloadFrame(key: string, automatic?: boolean): void
   removeNode(key: string): void
   select(key: string | null, additive?: boolean): void
@@ -985,6 +992,8 @@ export const useStore = create<State>((set, get) => {
       if (name) get().runTidy()                      // restore must NOT tidy - it would destroy positions
       else scheduleSave()
     },
+    bumpRev(key) { set((s) => ({ nodes: s.nodes.map((n) => (n.key === key ? { ...n, rev: (n.rev ?? 0) + 1 } : n)) })) },
+    setThemeOn(key, theme) { set((s) => ({ nodes: s.nodes.map((n) => (n.key === key ? { ...n, themeOn: theme } : n)) })) },
     setStatus(key, status, error) {
       // any real ready/error resets the one-shot retry allowance, so a later manual reload or a
       // fresh manifest earns its own auto-retry again

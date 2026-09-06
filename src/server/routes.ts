@@ -38,6 +38,17 @@ export function routesMiddleware(server: ViteDevServer, clientDir: string): Conn
         return res.end(readFileSync(join(clientDir, 'shell', 'favicon', name)))
       } catch { return next() }
     }
+    else if (path.startsWith(`${ROUTE}/bakes/`)) {
+      // compiled textures: design/.local/bakes/<gen>/<key>/<n>.png - the generation is in the path,
+      // so a texture URL is immutable and the browser may cache it for ever
+      const m = /^\/(\d+)\/([a-f0-9]{16})\/(\d+)\.png$/.exec(path.slice(`${ROUTE}/bakes`.length))
+      if (!m) { res.statusCode = 404; return res.end() }
+      try {
+        const png = readFileSync(join(server.config.root, 'design', '.local', 'bakes', m[1], m[2], `${m[3]}.png`))
+        res.setHeader('content-type', 'image/png'); res.setHeader('cache-control', 'public, max-age=31536000, immutable')
+        return res.end(png)
+      } catch { res.statusCode = 404; return res.end() }
+    }
     else if (path === `${ROUTE}/bridge.js`) {
       res.setHeader('content-type', 'text/javascript')
       return res.end(readFileSync(join(clientDir, 'frame-host', 'bridge.js'), 'utf8'))

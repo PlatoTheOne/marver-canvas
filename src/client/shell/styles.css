@@ -150,21 +150,16 @@ button svg { pointer-events: none }   /* event targets stay on the button - pan 
   opacity: var(--grid-alpha, 1) }
 .sh-content { will-change: auto }
 #sh-world { position: relative; width: 1px; height: 1px }
-#sh-world.sh-gesturing .sh-live { pointer-events: none }          /* law G-4 (live iframe only; lean is always pe:none) */
+#sh-world.sh-gesturing .sh-live { pointer-events: none }          /* law G-4 */
 .sh-gesturing .sh-content { will-change: transform }              /* law G-3: gesture-scoped only */
 /* preset transitions: armed by animateLayout() around device/tidy mutations - nodes ease
    to their new frame on the same 320ms ease-out the camera fit animates with */
 #sh-world.sh-preset .sh-node { transition: transform .32s cubic-bezier(.25,.46,.45,.94),
   width .32s cubic-bezier(.25,.46,.45,.94), height .32s cubic-bezier(.25,.46,.45,.94) }
-#sh-world.sh-preset .sh-node-body,
-#sh-world.sh-preset .sh-node .sh-live { transition: width .32s cubic-bezier(.25,.46,.45,.94),
+#sh-world.sh-preset .sh-node-body { transition: width .32s cubic-bezier(.25,.46,.45,.94),
   height .32s cubic-bezier(.25,.46,.45,.94) }
-/* Device-sweep: a frame WITH a ready lean cover jumps its LIVE iframe straight to the final
-   width (ONE reflow, hidden under the cover) while the lean cover - being width:100% of the animating
-   body - reflows smoothly every frame (real CSS, the device-sweep fix). A frame WITHOUT a usable
-   cover keeps the live width animation above. */
-body:not(.sh-laser):not(.sh-commenting) #sh-world.sh-preset .sh-node:has(.sh-lean[data-ready]):not(.interact) .sh-live { transition: none }
-
+/* the live iframe takes its new size at once (ONE reflow per sweep) while the body's box eases to it;
+   the frame sleeps again under the new size once it settles */
 /* cursor conventions (Figma): arrow everywhere; grab only while space is held */
 body.sh-space .sh-canvas { cursor: grab }
 body.sh-space.sh-panning .sh-canvas { cursor: grabbing }
@@ -199,8 +194,7 @@ body.sh-space .sh-node { pointer-events: none }                   /* space-drag 
   font-size: 11px; color: var(--head-dim);
   border-bottom: 1px solid var(--node-brd); user-select: none;
   border-radius: var(--r-node) var(--r-node) 0 0;
-  background-color: var(--head-bg); background-image: var(--head-sheen);
-  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur) }
+  background-color: var(--head-bg); background-image: var(--head-sheen) }   /* no backdrop-filter: one render surface less per frame */
 .sh-node-head .id { font-weight: 600; color: var(--head-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* frame icons: every sidebar row leads with one */
 .sh-node-head .iicon { flex: none; color: var(--head-dim) }
@@ -210,20 +204,9 @@ body.sh-space .sh-node { pointer-events: none }                   /* space-drag 
 .sh-panel .sub.vrow { padding-left: 51px }
 .sh-node-head .dim { margin-left: auto; color: var(--head-dim); flex: none; font-variant-numeric: tabular-nums }
 .sh-node-body { position: relative; background: var(--node-bg); border-radius: 0 0 var(--r-node) var(--r-node); overflow: hidden }
+/* no content-visibility on the body: it flips frames between skipped and rendered as they cross the
+   viewport during a zoom, and the raster storm that follows left the page unfinished 2.5 s later */
 .sh-node iframe { border: 0; display: block }
-/* LEAN-PRIMARY: the lean DOM-snapshot <iframe> (static html, 0 JS) is what you SEE for a
-   passive frame - at rest AND during pan/zoom/resize. There is NO per-gesture swap between the lean
-   and the live iframe (the swap shifted text ~1-2px = "jiggle", and flashed mermaid/theme colors,
-   because two documents never render pixel-identically). The live app (.sh-live) sits underneath and
-   shows ONLY when: the frame is interacted (.interact), laser/comment mode is on, or the lean is not
-   yet built (no data-ready = live-fallback). Hard cut, never a crossfade - two ~1px-offset text docs
-   would ghost into double text. */
-.sh-lean { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; z-index: 1;
-  opacity: 0; pointer-events: none; transition: none; background: var(--node-bg) }
-.sh-lean[data-ready] { opacity: 1 }
-.sh-node.interact .sh-lean,
-body.sh-laser .sh-lean,
-body.sh-commenting .sh-lean { opacity: 0 }
 .sh-overlay { position: absolute; inset: 0; z-index: 2 }   /* above the lean (z1) so drag-by-body works; inherits the app arrow cursor */
 .sh-node.interact { border-color: var(--interact);
   outline: calc(2px * var(--sh-inv, 1)) solid var(--interact);

@@ -246,8 +246,8 @@ export function Canvas() {
     if (!app || !canvas) return
     let settle = 0
     const beginGesture = (panning: boolean) => {
-      // sh-camera = a CANVAS pan/zoom (drives the snapshot cover); sh-gesturing also drops iframe
-      // pointer-events. A frame click/drag sets only sh-gesturing, so it never flashes a snapshot.
+      // sh-camera = a CANVAS pan/zoom (the image-LOD freeze signal); sh-gesturing also drops iframe
+      // pointer-events. A frame click/drag sets only sh-gesturing.
       document.getElementById('sh-world')?.classList.add('sh-gesturing', 'sh-camera')
       document.body.classList.toggle('sh-panning', panning)
       clearTimeout(settle)

@@ -87,3 +87,6 @@ async function boot() {
 }
 
 boot()
+// Fast Refresh keeps this document alive across edits: tell the shell its source changed, so a
+// sleeping frame wakes and compiles again (a texture describes a source revision).
+if (import.meta.hot) import.meta.hot.on('vite:afterUpdate', () => post({ type: 'sh:hmr', id }))

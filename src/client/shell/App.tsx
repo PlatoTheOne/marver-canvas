@@ -555,6 +555,10 @@ export function App() {
         s.setStatus(nodeKey, 'error', String(data.message ?? 'unknown error'))
       } else if (data.type === 'sh:exit-interact') {
         if (s.interact === nodeKey) setInteract(null)
+      } else if (data.type === 'sh:theme-applied') {
+        if (typeof data.theme === 'string') s.setThemeOn(nodeKey, data.theme)
+      } else if (data.type === 'sh:hmr') {
+        s.bumpRev(nodeKey)
       } else if (data.type === 'sh:measure') {
         // Generation guard: the sender echoes ITS document's URL rev; a
         // WindowProxy survives navigation, so a stale pre-navigation message would

@@ -108,10 +108,6 @@ export function marverPlugin(ctx: PluginCtx): Plugin {
         return {
           html,
           tags: [
-            // SYNCHRONOUS closed-shadow shim: the bridge is a deferred module, so an authored classic
-            // script could attachShadow({mode:'closed'}) before it runs. This classic inline script
-            // runs during parse, before authored content, so the serializer can degrade such a frame.
-            { tag: 'script', children: `(function(){var a=Element.prototype.attachShadow;if(a)Element.prototype.attachShadow=function(i){if(i&&i.mode==='closed')window.__mvClosedShadow=1;return a.call(this,i)};})();`, injectTo: 'head-prepend' },
             { tag: 'script', attrs: { type: 'module' }, children: `import '${VIRTUAL_THEME}'`, injectTo: 'head-prepend' },
             { tag: 'script', attrs: { type: 'module', src: bridge }, injectTo: 'head-prepend' },
           ],
@@ -141,6 +137,7 @@ export function marverPlugin(ctx: PluginCtx): Plugin {
     },
 
     configureServer(server: ViteDevServer) {
+      let bakeGen = Date.now()   // the source generation (see bumpGen): unique per server start
       // THE #20 FIX. registry.ts lives in node_modules, so Vite stamps its import URL
       // with ?v=<hash> and serves it `max-age=31536000,immutable` - correct for static
       // package code, poison for this one module: its TRANSFORM is dynamic (the glob
@@ -190,7 +187,7 @@ export function marverPlugin(ctx: PluginCtx): Plugin {
       }
 
       // Pre-middlewares: our routes + api run before Vite's html fallback.
-      server.middlewares.use(apiMiddleware(root, { viewports: config.viewports, origin: listeningOrigin }))
+      server.middlewares.use(apiMiddleware(root, { viewports: config.viewports, origin: listeningOrigin, bakeGen: () => bakeGen }))
       server.middlewares.use(routesMiddleware(server, clientDir))
 
       devServer = server   // A7: handleHotUpdate needs ws.send to emit sh:frame-invalidated
@@ -243,6 +240,17 @@ export function marverPlugin(ctx: PluginCtx): Plugin {
         pushTheme()
       }
 
+      // The source GENERATION: bumped on any watched change under the project (frames, screens, css,
+      // components - anything a frame may import), so a compiled bake (design/.local/bakes/<gen>/) can
+      // never outlive an edit; older generations are pruned as they are superseded.
+      const localDir = join(root, 'design', '.local'), boardsDirGen = join(root, 'design', 'boards'), manifestPath = join(root, 'design', 'manifest.json')
+      const bumpGen = (f: string) => {
+        if (f.startsWith(localDir) || f.startsWith(boardsDirGen) || f === manifestPath || f.includes('/node_modules/')) return
+        bakeGen++
+        const keep = bakeGen
+        setTimeout(async () => { try { (await import('./bake.ts')).pruneBakes(root, keep) } catch { /* best-effort */ } }, 500)
+      }
+      server.watcher.on('add', bumpGen); server.watcher.on('unlink', bumpGen); server.watcher.on('change', bumpGen)
       server.watcher.on('add', (f) => { if (inScope(f)) { regen(); rescanTheme() } })
       server.watcher.on('unlink', (f) => { if (inScope(f)) { regen(); rescanTheme() } })
       // change: only meta edits matter; scanFrames re-extracts and writeManifest de-dupes writes.

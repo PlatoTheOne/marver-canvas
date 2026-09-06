@@ -12,20 +12,15 @@ const isHtmlFrame = new URL(import.meta.url).searchParams.get('html') === '1'
 const post = (msg) => { if (window.parent !== window) window.parent.postMessage(msg, location.origin) }
 const id = new URLSearchParams(location.search).get('id') ?? location.pathname
 
-// The shell serialises this frame's DOM (same origin) for the lean facade. Open shadow roots
-// are walkable, but a CLOSED root is invisible after the fact - flag it at creation so the serialiser
-// degrades the frame (keeps it live) instead of shipping a lean copy missing its shadow content.
-const _attachShadow = Element.prototype.attachShadow
-if (_attachShadow) Element.prototype.attachShadow = function (init) {
-  if (init && init.mode === 'closed') window.__mvClosedShadow = true
-  return _attachShadow.call(this, init)
-}
-
 // theme lands as BOTH signals: [data-theme] plus the `dark` class Tailwind/shadcn key on
 const setTheme = (theme) => {
   document.documentElement.dataset.theme = theme
   document.documentElement.classList.toggle('dark', theme === 'dark')
+  // the shell sleeps a frame only under the theme it has actually painted: report it, two frames later
+  requestAnimationFrame(() => requestAnimationFrame(() => post({ type: 'sh:theme-applied', id, theme })))
 }
+// the theme this document booted with (the URL's) counts as applied
+requestAnimationFrame(() => requestAnimationFrame(() => post({ type: 'sh:theme-applied', id, theme: new URLSearchParams(location.search).get('theme') ?? 'light' })))
 
 if (isHtmlFrame) {
   const theme = new URLSearchParams(location.search).get('theme')

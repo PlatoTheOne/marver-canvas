@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { cap, frameUrl, useStore, CONFIG, type Node } from '../store.ts'
 import { CopyIcon, IntentGlyph, ParallelogramFillIcon, ReloadIcon, SlideFrameIcon, XIcon } from '../icons.tsx'
 import { CommentLayer } from '../Comments.tsx'
@@ -6,7 +6,7 @@ import { useComments } from '../comments-store.ts'
 import { threadHostKey } from '../keys.ts'
 import { registerFrame, unregisterFrame } from './frame-registry.ts'
 import { primeCameraFor } from './camera-broadcast.ts'
-import { registerLeanFrame, dropSnapshot, scheduleCapture, invalidateLean } from './snapshots.ts'
+import { sleep, wake } from './sleep.ts'
 import { canAutoReload, shouldArmReadyWatch } from './ready-watch.ts'
 
 export const HEADER = 28
@@ -34,6 +34,12 @@ function WorkShimmer({ belowBadge }: { belowBadge: boolean }) {
  * One frame on the canvas. Iframe laws: the iframe element is created once per node key
  * and never remounted - theme changes go through sh:set-theme, size changes are CSS only.
  *
+ * At rest the frame SLEEPS in place (sleep.ts, spec 16): the same live document, its animations
+ * paused and its backdrop-filters replaced by certified textures. Interact mode wakes it; laser,
+ * comment pins and selection act on the sleeping document as it is. A frame the human has
+ * interacted with is a state the compiler cannot reproduce from its URL: it stays awake until
+ * it is reloaded. Any change of theme, size or source wakes first and sleeps again once settled.
+ *
  * Every interactive element carries `sh-no-pan` (rzpp's panning.excluded checks the event
  * TARGET's classList, nothing else), and drags additionally raise the store gesture flag,
  * which hard-disables canvas panning for the duration. Both are needed: the class stops the
@@ -57,15 +63,12 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
   if (frame && initialSrc.current === null) initialSrc.current = frameUrl(frame, node.theme)
   const fileRef = useRef(frame ? `${frame.kind}:${frame.file}` : null)
 
-  // theme switch without remount: the live iframe flips via message (no navigation). The lean is
-  // INVALIDATED (not mutated) - a baked mermaid SVG can't be re-themed in place, so we drop it, show
-  // live while it re-renders in the new theme, and the capture effect (theme is a dep) rebuilds a
-  // fresh lean that is only shown once ready. No light-on-dark flash.
+  // theme switch without remount: the live iframe flips via message (no navigation); the frame
+  // reports sh:theme-applied and only then sleeps again under the new theme (node.themeOn)
   useEffect(() => {
     if (themeRef.current !== node.theme) {
       themeRef.current = node.theme
       iframeRef.current?.contentWindow?.postMessage({ type: 'sh:set-theme', theme: node.theme }, '*')
-      invalidateLean(node.key)
     }
   }, [node.theme, node.key])
 
@@ -90,53 +93,6 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
     registerWin()
   }, [node.key])
 
-  // Register the facade <iframe> so the lean coordinator can drive its srcdoc imperatively.
-  const bindLean = useCallback((el: HTMLIFrameElement | null) => { registerLeanFrame(node.key, el) }, [node.key])
-  // capture a fresh lean snapshot once the frame is ready and quiet, and whenever its CONTENT changes
-  // (nav). Resize needs no re-capture (the lean doc reflows) and theme needs none (attribute flip),
-  // so neither is a dep - keeping captures rare. Never during a gesture; the coordinator serialises.
-  useEffect(() => {
-    // capture reads the live iframe's same-origin document - true in dev AND publish (published frames
-    // are bundled same-origin and served by `marver serve`), so the lean tier works in both via this
-    // client-side capture. Fail-soft: a frame that can't serialise stays live (publish == today's
-    // behaviour in the worst case). No headless build step / heavy dependency needed.
-    if (node.status !== 'ready' || node.missing) return
-    const iframe = iframeRef.current
-    if (!iframe) return
-    const t = setTimeout(() => {
-      // never re-admit a cover while this frame hosts an open thread / draft: the live app
-      // must stay visible (its highlight updates in real time). A status/theme change would
-      // otherwise capture the live DOM WITH the highlight baked in and re-cover it. The
-      // hostsCard rail recaptures a clean lean once the card closes.
-      const c = useComments.getState()
-      // hosting goes through the resolver (keys.ts): an adopted thread's card renders
-      // here even though its stored nodeKey names a node that no longer exists
-      const hosting = (!!c.active && c.threads.some((th) =>
-        th.id === c.active && !th.resolved && threadHostKey(th, useStore.getState().nodes) === node.key)) || c.draft?.nodeKey === node.key
-      if (hosting) return
-      scheduleCapture(node.key, iframe, { sourceRevision: String(node.nav ?? 0), theme: node.theme })
-    }, 450)
-    return () => clearTimeout(t)
-    // node.theme IS a dep: baked content (mermaid SVG) can't be re-themed by the cover's attribute
-    // flip, so a theme change re-captures after the live frame re-renders (key includes theme).
-  }, [node.status, node.nav, node.key, node.missing, node.theme])
-  useEffect(() => () => dropSnapshot(node.key), [node.key])   // drop the snapshot on unmount
-  // a reload / file-swap / error takes the frame out of 'ready': drop its cover so a stale picture
-  // never lingers (nav may not bump on a same-file reload). The next 'ready' re-captures.
-  useEffect(() => { if (node.status !== 'ready') dropSnapshot(node.key) }, [node.status, node.key])
-  // LEAN-PRIMARY focus handoff: entering interact shows the live app (drop the now-stale lean at
-  // once); leaving it recaptures the live frame's CURRENT state (the user may have typed/toggled)
-  // and only swaps back to lean once that fresh capture is admitted. force=true: same nav/theme.
-  const prevInteract = useRef(interact)
-  useEffect(() => {
-    if (prevInteract.current === interact) return
-    const wasInteract = prevInteract.current
-    prevInteract.current = interact
-    if (interact) invalidateLean(node.key)
-    else if (wasInteract && node.status === 'ready' && iframeRef.current)
-      scheduleCapture(node.key, iframeRef.current, { sourceRevision: String(node.nav ?? 0), theme: node.theme }, true)
-  }, [interact, node.key, node.nav, node.theme, node.status])
-
   // laser mode rides the same rail; re-sent when a frame becomes ready
   // so late loaders join an already-lasered board
   const laser = useStore((s) => s.laser)
@@ -147,21 +103,6 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
   const hostsCard = useComments((s) =>
     (!!s.active && s.threads.some((t) =>
       t.id === s.active && !t.resolved && threadHostKey(t, useStore.getState().nodes) === node.key)) || s.draft?.nodeKey === node.key)
-  // a frame hosting an OPEN thread or a draft must show its LIVE app, not the frozen lean
-  // cover: the active-element highlight lives in the live DOM and updates in real time
-  // (open -> lit, close -> cleared). Without this the cover re-freezes the moment comment
-  // mode ends and either bakes a stale highlight or hides the live one. Mirror the interact
-  // rail: drop the cover while hosting, rebuild a fresh lean once the card closes (the
-  // highlight is cleared by then, so the recapture is clean).
-  const prevHostsCard = useRef(hostsCard)
-  useEffect(() => {
-    if (prevHostsCard.current === hostsCard) return
-    const wasHosting = prevHostsCard.current
-    prevHostsCard.current = hostsCard
-    if (hostsCard) invalidateLean(node.key)
-    else if (wasHosting && node.status === 'ready' && iframeRef.current)
-      scheduleCapture(node.key, iframeRef.current, { sourceRevision: String(node.nav ?? 0), theme: node.theme }, true)
-  }, [hostsCard, node.key, node.nav, node.theme, node.status])
   useEffect(() => {
     if (node.status === 'ready' || !laser)
       iframeRef.current?.contentWindow?.postMessage({ type: 'sh:laser', on: laser }, location.origin)
@@ -179,6 +120,27 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
     if (node.status === 'ready' || !interact)
       iframeRef.current?.contentWindow?.postMessage({ type: 'sh:interactive', on: interact }, location.origin)
   }, [interact, node.status])
+  // SLEEP lifecycle. Interact = awake and DIRTY (the app's state is now its own); a resize drag =
+  // awake for the whole drag; any other change of the key (theme once applied, size, source revision,
+  // navigation) wakes first - the old override describes another state - and sleeps again once the
+  // new one has settled. Laser and comment mode need nothing: the sleeping document IS the live one.
+  const dirty = useRef(false)
+  const resizing = useRef(false)
+  const [resizeTick, setResizeTick] = useState(0)
+  useEffect(() => { dirty.current = false }, [node.nav])   // a fresh document is pristine again
+  const w = Math.round(node.w), h = Math.round(node.h)
+  useEffect(() => {
+    const iframe = iframeRef.current
+    if (!iframe || !frame || node.missing) return
+    if (interact) dirty.current = true
+    wake(node.key, iframe)
+    if (interact || dirty.current || resizing.current || node.status !== 'ready') return
+    if (node.themeOn !== undefined && node.themeOn !== node.theme) return   // the frame has not painted the new theme yet
+    const t = setTimeout(() => { void sleep(node.key, iframe, { frame: frame.id, theme: node.theme, w, h }) }, 250)
+    return () => clearTimeout(t)
+  }, [interact, node.status, node.theme, node.themeOn, node.rev, node.nav, w, h, node.missing, frame?.id, node.key, resizeTick])
+  useEffect(() => () => wake(node.key, iframeRef.current), [node.key])
+
   // image-LOD: once the frame is ready its content listener is live, so send the settled zoom - a static
   // board that never gets a gesture then still sharpens its images from the cheap low-res first paint.
   useEffect(() => {
@@ -268,8 +230,9 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
     const begin = () => {
       if (gesturing) return
       gesturing = true
-      world.classList.add('sh-gesturing')   // drops iframe pointer-events (sh-camera is NOT set, so no cover)
+      world.classList.add('sh-gesturing')   // drops iframe pointer-events
       setGesture(true)
+      if (mode !== 'move') { resizing.current = true; setResizeTick((t) => t + 1) }   // awake for the whole resize
     }
     const MOVE_THRESHOLD = 3   // px in screen space before a press counts as a drag
 
@@ -297,6 +260,7 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
       try { el.releasePointerCapture(e.pointerId) } catch { /* already released */ }
       world.classList.remove('sh-gesturing')
       setGesture(false)
+      if (resizing.current) { resizing.current = false; setResizeTick((t) => t + 1) }   // settle, then sleep again
       el.removeEventListener('pointermove', onMove)
       el.removeEventListener('pointerup', done)
       el.removeEventListener('pointercancel', done)
@@ -403,13 +367,6 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
           onLoad={registerWin}
           style={{ width: node.w, height: node.h, display: node.missing || node.status === 'error' ? 'none' : 'block' }}
         />
-        {/* Lean facade: a DOM-snapshot (static html, 0 JS) covering the live iframe only while
-            the canvas is gesturing (CSS), so a heavy frame never flashes white mid-transform and the
-            device sweep reflows correctly. sandbox WITHOUT allow-scripts = no JS runs; allow-same-origin
-            so fonts/assets resolve and the shell can flip its theme + restore scroll. Never registered,
-            never messaged, pointer-events:none - it is NOT the live iframe (role: .sh-lean).
-            Rendered in dev AND publish (runtime client-side capture; frames are same-origin in both). */}
-        <iframe ref={bindLean} className="sh-lean" sandbox="allow-same-origin" title="" aria-hidden tabIndex={-1} />
         {/* the overlay eats mouse events for drag-by-body; laser and comment mode both
             need the mouse INSIDE the frame for hover highlights, so it steps aside
             (drag still works via the header) */}

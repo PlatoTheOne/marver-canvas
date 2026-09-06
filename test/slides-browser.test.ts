@@ -9,9 +9,9 @@ import { Browser } from './browser.ts'
  * The slides hard invariants (spec 09, slice 8), proven in a real browser
  * against a real published build - not against the constants that produced it.
  *
- * (1) A resting slide serializes to the LEAN path: the facade admits
- *     (`data-ready`) for every slide - Chart (SVG) and Video (poster-only)
- *     included - and the lean doc holds zero <canvas>/<video> elements.
+ * (1) A resting slide SLEEPS in place (spec 16): the pause style is installed in every
+ *     slide's live document - Chart (SVG) and Video (poster-only) included - with
+ *     nothing to compile (no backdrop-filter), and the chart really rendered.
  * (2) Deck order is the board's frozen reading order and stepping walks it.
  * (3) Slides mode survives a refresh via the hash (`slides=1`).
  * (4) The stage stamps the play contract (`data-sl-play`/`data-sl-entered`)
@@ -162,35 +162,29 @@ const key = (k: string) => async (tab: string) => {
 }
 
 describe('slides in a real published browser', () => {
-  skippable('every resting slide - chart and video included - admits a lean cover with no canvas/video', async () => {
+  skippable('every resting slide - chart and video included - SLEEPS in place, and the chart really rendered', async () => {
     const tab = await browser!.tab({ width: 1600, height: 1000 })
     await browser!.go(tab, `${base}/#/b/rest`)
     await browser!.until(tab, `!!document.querySelector('.sh-panel')`)
-    // all three facades must ADMIT - a degraded slide never gets data-ready,
-    // so readiness itself is the serializability assertion
-    await browser!.until(tab, `document.querySelectorAll('.sh-lean[data-ready]').length === 3`, 45_000)
+    // at rest every frame is its own live document, asleep: the pause style is installed in each
+    await browser!.until(tab, `[...document.querySelectorAll('iframe.sh-live')].filter((f) => f.contentDocument?.getElementById('mv-sleep')).length === 3`, 45_000)
     const audit = await browser!.eval(tab, `
-      [...document.querySelectorAll('.sh-lean[data-ready]')].map((f) => {
+      [...document.querySelectorAll('iframe.sh-live')].map((f) => {
         const d = f.contentDocument
-        return {
-          canvases: d.querySelectorAll('canvas').length,
-          videos: d.querySelectorAll('video').length,
-          svgs: d.querySelectorAll('svg').length,
-        }
+        return { svgs: d.querySelectorAll('svg').length, slept: !!d.getElementById('mv-sleep'), textures: d.querySelectorAll('[data-mv-sleep]').length }
       })
     `)
-    for (const a of audit) {
-      expect(a.canvases).toBe(0)
-      expect(a.videos).toBe(0)
-    }
+    for (const a of audit) expect(a.slept).toBe(true)
+    // a slide has no backdrop-filter to compile: its sleep is the animation pause alone
+    for (const a of audit) expect(a.textures).toBe(0)
     // the chart really rendered (as SVG) rather than silently not mounting
     expect(audit.some((a: { svgs: number }) => a.svgs > 0)).toBe(true)
     // the board JSON stores 640×360 on these nodes: the canvas honors it like
     // any frame (devices and resizing work on slides) and THE FIT scales the
-    // 1280×720 stage into the box - in the lean cover too, which runs no JS
+    // 1280×720 stage into the box
     const widths = await browser!.eval(tab, `[...document.querySelectorAll('.sh-node')].map((n) => n.offsetWidth)`)
     expect(widths).toEqual([640, 640, 640])
-    const fitted = await browser!.eval(tab, `[...document.querySelectorAll('.sh-lean[data-ready]')].map((f) => f.contentDocument.querySelector('.sl-root').getBoundingClientRect().width - f.clientWidth)`)
+    const fitted = await browser!.eval(tab, `[...document.querySelectorAll('iframe.sh-live')].map((f) => f.contentDocument.querySelector('.sl-root').getBoundingClientRect().width - f.clientWidth)`)
     for (const d of fitted) { expect(d).toBeLessThanOrEqual(0); expect(d).toBeGreaterThan(-6) }   // fills the node's viewport (16:9 rounding aside), never overflows it
   })
 
