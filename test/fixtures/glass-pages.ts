@@ -17,6 +17,9 @@ export const PAGES: Record<string, string> = {
   restless: page(`<div id="pill" class="glass" style="${PILL}">restless</div><script>let h=0;(function tick(){document.body.style.background='linear-gradient(135deg,hsl('+(h++%360)+' 90% 60%),#7b61ff)';requestAnimationFrame(tick)})()</script>`),
   // a blend mode composes the element with what is behind it: a texture underneath is not the same picture
   blend: page(`<div id="pill" class="glass" style="${PILL};mix-blend-mode:multiply;background:rgba(255,200,120,.7)">multiplied</div>`),
-  // the override's own style element is what moves a box here: the geometry guard must reject everything
-  moving: page(`<div id="pill" class="glass" style="${PILL}">moves under the override</div>`, 'html:has(#mv-bake-style) #pill{margin-left:7px}'),
+  // the override's own style element moves an UNRELATED box, far from the glass: pixels inside the
+  // glass certify, the geometry guard must still reject everything
+  moving: page(`<div id="pill" class="glass" style="${PILL}">a still pill</div><div id="other" style="position:absolute;left:400px;top:300px;width:60px;height:40px;background:#123">other</div>`, 'html:has(#mv-bake-style) #other{margin-left:7px}'),
+  // a transparent border with the colour clipped to the padding box: the tint must stay off the border
+  clip: page(`<div id="pill" class="glass" style="${PILL};border:4px solid transparent;background-clip:padding-box">clipped tint</div>`),
 }

@@ -93,12 +93,20 @@ describe('the compiler (bake.ts)', () => {
     if (!r.ok) expect(r.error).toMatch(/never stopped changing/)
   })
 
-  skippable('the geometry guard: an override that moves any box rejects every texture', async () => {
+  skippable('the geometry guard: an override that moves any box - even one outside every glass - rejects every texture', async () => {
     const r = await bake('moving')
     if (!r.ok) throw new Error(r.error)
     expect(r.targets).toHaveLength(1)
-    expect(r.targets[0].verified).toBe(false)
+    expect(r.targets[0].maxErr).toBeLessThanOrEqual(32)   // the pixels inside the glass were fine
+    expect(r.targets[0].verified).toBe(false)              // the box that moved was not
     expect(r.rejected).toBe(1)
+  })
+
+  skippable('an authored background-clip keeps the tint off a transparent border, and the perimeter certifies', async () => {
+    const r = await bake('clip')
+    if (!r.ok) throw new Error(r.error)
+    expect(r.targets).toHaveLength(1)
+    expect(r.targets[0].verified).toBe(true)
   })
 
   it('a bake key names the frame, theme and rounded size - nothing else', () => {

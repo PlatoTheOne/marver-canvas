@@ -32,11 +32,13 @@ export default () => (
            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px) }
       [data-theme="dark"] main { background: linear-gradient(135deg, #1b1f3a 0%, #3a1b4d 50%, #0d3b3b 100%) }
       [data-theme="dark"] .g { background: rgba(0,0,0,.35); color: #eee; border-color: rgba(255,255,255,.2) }
+      .g.imp { transition: backdrop-filter .6s !important, background-color .6s !important }
     \`}</style>
     <div className="g" style={{ left: 40, top: 40, width: 300 }}>${label}</div>
     <div className="g" style={{ left: 40, top: 160, width: 420 }}>Lane first</div>
     <div className="g" style={{ left: 380, top: 90, width: 260 }}>Chase dispatch</div>
     <div className="g" style={{ left: 480, top: 300, width: 260, transition: 'backdrop-filter .6s, background-color .6s' }}>Dispatch now</div>
+    <div className="g imp" style={{ left: 60, top: 380, width: 300 }}>Important motion</div>
   </main>
 )
 `
@@ -119,11 +121,11 @@ async function reloadGlass(): Promise<void> {
 /** At rest on the main board: both frames asleep (a frame left dirty by an earlier test is reloaded). */
 async function rested(): Promise<void> {
   await onBoard()
-  const whole = `${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 4`
+  const whole = `${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 5`
   if (!(await ev(whole))) { await wait(1500); if (!(await ev(whole))) await reloadGlass() }
   await bothAsleep()
 }
-const bothAsleep = () => until(`${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 4 && ${ASLEEP('app/plain')} && ${TEXTURES('app/plain')} === 0`, 90_000)
+const bothAsleep = () => until(`${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 5 && ${ASLEEP('app/plain')} && ${TEXTURES('app/plain')} === 0`, 90_000)
 
 /** A screenshot of the glass frame's own box - inset 24 px so no ring, outline or handle of the
  *  node's own chrome takes part, right of the side panel and below the toolbar - at DPR 2. */
@@ -156,13 +158,13 @@ describe('sleep in place, on a real dev canvas', () => {
     await bothAsleep()
     const lines = bakeLines()
     expect(lines).toHaveLength(1)
-    expect(lines[0]).toMatch(/bake: app\/glass light 800x500 - 4 effects, 0 stay live/)
+    expect(lines[0]).toMatch(/bake: app\/glass light 800x500 - 5 effects, 0 stay live/)
     const urls: string[] = await ev(TEXTURE_URLS('app/glass'))
-    expect(urls).toHaveLength(4)
+    expect(urls).toHaveLength(5)
     for (const u of urls) expect(u).toMatch(/^\/__mv\/bakes\/\d+\/[0-9a-f]{16}\/\d+\.png$/)
     // the sleeping document is the live one: the pause rule and the overrides are one <style>, nothing else changed
     expect(await ev(`${DOC('app/glass')}.querySelectorAll('#mv-sleep').length`)).toBe(1)
-    expect(await ev(`${DOC('app/glass')}.body.querySelectorAll('.g').length`)).toBe(4)
+    expect(await ev(`${DOC('app/glass')}.body.querySelectorAll('.g').length`)).toBe(5)
   })
 
   skippable('the compile endpoint: owner-gated, validated, cached, and its textures are immutable files', async () => {
@@ -178,7 +180,7 @@ describe('sleep in place, on a real dev canvas', () => {
     expect(r.status).toBe(200)
     const a = r.body.answers[0]
     expect(a).toMatchObject({ frame: 'app/glass', theme: 'light', w: 800, h: 500, ok: true, ms: 0 })   // ms 0: the cache answered
-    expect(a.targets.filter((t: { verified: boolean }) => t.verified)).toHaveLength(4)
+    expect(a.targets.filter((t: { verified: boolean }) => t.verified)).toHaveLength(5)
     const tex = await ev(`fetch(${JSON.stringify(a.targets[0].texture)}).then((r) => ({ status: r.status, cc: r.headers.get('cache-control'), type: r.headers.get('content-type') }))`)
     expect(tex).toMatchObject({ status: 200, type: 'image/png' })
     expect(tex.cc).toMatch(/immutable/)
@@ -204,7 +206,7 @@ describe('sleep in place, on a real dev canvas', () => {
     await ev(`${ST}.setInteract('g1')`)
     await until(`!${ASLEEP('app/glass')}`, 5_000)
     const awakeEarly = await shotGlass()   // within the first frames of the wake
-    await wait(700)                          // longer than the authored .6s transition on the fourth element
+    await wait(700)                          // longer than the authored .6s transitions (one of them !important)
     const awake = await shotGlass()
     expect((await diff(awakeEarly, awake)).gt2, 'the wake ran an authored transition').toBe(0)   // gt2: GPU dither is 1 level
     await ev(`${ST}.setInteract(null)`)
@@ -224,6 +226,17 @@ describe('sleep in place, on a real dev canvas', () => {
     expect((await diff(asleep, again)).gt2).toBe(0)
   })
 
+  skippable('a document that reloads itself (same iframe, same window) is pristine again and sleeps', async () => {
+    await rested()
+    await ev(`${ST}.setInteract('g1')`)
+    await until(`!${ASLEEP('app/glass')}`, 5_000)
+    await ev(`${ST}.setInteract(null)`)
+    await wait(1200)
+    expect(await ev(ASLEEP('app/glass'))).toBe(false)   // dirty
+    await ev(`document.querySelector('iframe.sh-live[title="app/glass"]').contentWindow.location.reload()`)
+    await until(`${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 5`, 60_000)
+  })
+
   skippable('laser mode and selection act on the sleeping document; they never wake it', async () => {
     await rested()
     await ev(`${ST}.setLaser(true)`)
@@ -238,14 +251,14 @@ describe('sleep in place, on a real dev canvas', () => {
     await rested()
     const light: string[] = await ev(TEXTURE_URLS('app/glass'))
     await ev(`${ST}.setTheme('dark')`)
-    await until(`${NODE('g1')}.themeOn === 'dark' && ${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 4`, 90_000)
+    await until(`${NODE('g1')}.themeOn === 'dark' && ${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 5`, 90_000)
     expect(await ev(`${DOC('app/glass')}.documentElement.dataset.theme`)).toBe('dark')
     const dark: string[] = await ev(TEXTURE_URLS('app/glass'))
-    expect(dark).toHaveLength(4)
+    expect(dark).toHaveLength(5)
     expect(dark[0]).not.toBe(light[0])
     expect(bakeLines().filter((l) => l.includes('app/glass dark 800x500'))).toHaveLength(1)
     await ev(`${ST}.setTheme('light')`)
-    await until(`${NODE('g1')}.themeOn === 'light' && ${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 4`)
+    await until(`${NODE('g1')}.themeOn === 'light' && ${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 5`)
     expect(await ev(TEXTURE_URLS('app/glass'))).toEqual(light)
     expect(bakeLines().filter((l) => l.includes('app/glass light 800x500'))).toHaveLength(1)   // still the one compile
   })
@@ -260,7 +273,7 @@ describe('sleep in place, on a real dev canvas', () => {
     await wait(400)
     expect(await ev(ASLEEP('app/glass'))).toBe(false)
     await mouse('mouseReleased', h.x + 60, h.y + 36)
-    await until(`${NODE('g1')}.w > 800 && ${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 4`, 90_000)
+    await until(`${NODE('g1')}.w > 800 && ${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 5`, 90_000)
     const w = await ev(`Math.round(${NODE('g1')}.w)`), hh = await ev(`Math.round(${NODE('g1')}.h)`)
     expect(bakeLines().filter((l) => l.includes(`app/glass light ${w}x${hh}`))).toHaveLength(1)
     await ev(`${ST}.select(null)`)
@@ -291,7 +304,7 @@ describe('sleep in place, on a real dev canvas', () => {
     const before: string[] = await ev(TEXTURE_URLS('app/glass'))
     const genBefore = before[0].split('/')[3]
     writeFileSync(glassFile(), GLASS('Past due!'))
-    await until(`${DOC('app/glass')}?.body.textContent.includes('Past due!') && ${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 4`, 90_000)
+    await until(`${DOC('app/glass')}?.body.textContent.includes('Past due!') && ${ASLEEP('app/glass')} && ${TEXTURES('app/glass')} === 5`, 90_000)
     const after: string[] = await ev(TEXTURE_URLS('app/glass'))
     expect(after[0].split('/')[3]).not.toBe(genBefore)   // the old generation can never be served again
     expect(await ev(`fetch(${JSON.stringify(before[0])}, { cache: 'no-store' }).then((r) => r.status)`)).toBe(404)   // pruned on the server; the browser cache is beside the point

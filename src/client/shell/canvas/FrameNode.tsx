@@ -125,6 +125,7 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
   // navigation) wakes first - the old override describes another state - and sleeps again once the
   // new one has settled. Laser and comment mode need nothing: the sleeping document IS the live one.
   const dirty = useRef(false)
+  const lastDoc = useRef<Document | null>(null)   // a new document (reload, self-reload) is pristine again
   const resizing = useRef(false)
   const [resizeTick, setResizeTick] = useState(0)
   useEffect(() => { dirty.current = false }, [node.nav])   // a fresh document is pristine again
@@ -133,7 +134,9 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
   // must never be painted at a new size)
   useLayoutEffect(() => {
     const iframe = iframeRef.current
-    if (!iframe || !frame || node.missing) return
+    if (!iframe || !frame || node.missing) { wake(node.key, null); return }   // nothing to keep (a deleted frame's card must not retain its old document)
+    const doc = iframe.contentDocument
+    if (doc && doc !== lastDoc.current) { lastDoc.current = doc; dirty.current = false }
     if (interact) dirty.current = true
     wake(node.key, iframe)
     if (interact || dirty.current || resizing.current || node.status !== 'ready') return

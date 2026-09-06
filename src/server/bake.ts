@@ -30,8 +30,8 @@
  * background layers. Nothing else on the element; layout is never touched.
  */
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { join, sep } from 'node:path'
 import { Browser } from './cdp.ts'
 import { AREA, SURFACE, pool, shotConcurrency, withBrowser } from './shot.ts'
 import { readOwn, sleepRule } from '../shared/sleep-rule.ts'
@@ -59,6 +59,8 @@ const DEADLINE_MS = 45_000
 /** The largest frame an ask may name, in CSS px: the shot pipeline's bitmap budget at DPR 2. */
 export const ASK_MAX = { side: Math.floor(SURFACE / DSF), area: Math.floor(AREA / (DSF * DSF)) }
 const MAX_TARGETS = 200
+/** One element's texture, in CSS px (its 3x3 mirrored tiling is filtered in a page of its own). */
+const MAX_TARGET_AREA = 4_000_000
 const KEYS_PER_GEN = 400
 
 /** Runs INSIDE the frame document: the effect census and the paint-order levelling. Assigns
@@ -288,6 +290,7 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
     const targets = (await ev(`(window.__mvBakeTargets = ${DETECT})`)) as { i: number; sel: string; rect: BakeTarget['rect']; filter: string; level: number }[]
     if (!targets?.length) return { ok: true, targets: [], levels: 0, rejected: 0, ms: Date.now() - t0 }
     if (targets.length > MAX_TARGETS) return { ok: false, error: `too many effects to compile (${targets.length})` }
+    if (targets.some((t) => t.rect.w * t.rect.h > MAX_TARGET_AREA)) return { ok: false, error: 'an effect larger than the texture budget' }
     const levels = Math.max(...targets.map((t) => t.level)) + 1
     const geometryBefore = (await ev(GEOMETRY)) as number[][]
 
@@ -313,8 +316,8 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
       const full = await capture()
       const items = mine.map((t) => ({ i: t.i, x: t.rect.x, y: t.rect.y, w: t.rect.w, h: t.rect.h, filter: t.filter }))
       const { targetId: ft } = await b.send('Target.createTarget', { url: 'about:blank' }, undefined, me)
-      const { sessionId: fs } = await b.send('Target.attachToTarget', { targetId: ft, flatten: true }, undefined, me)
       try {
+        const { sessionId: fs } = await b.send('Target.attachToTarget', { targetId: ft, flatten: true }, undefined, me)
         const totalH = items.reduce((a, c) => a + Math.ceil(c.h) + 9, 0)
         await b.send('Emulation.setDeviceMetricsOverride', { width: Math.ceil(Math.max(...items.map((c) => c.w))), height: Math.min(16_000, totalH), deviceScaleFactor: TEXTURE_DSF, mobile: false }, fs, me)
         await b.send('Page.enable', {}, fs, me)
@@ -384,22 +387,32 @@ export function bakeKey(ask: BakeAsk): string {
 
 function cacheDir(root: string, gen: number, key: string): string { return join(root, 'design', '.local', 'bakes', String(gen), key) }
 
+/** The cache lives INSIDE the project: a `bakes` directory that resolves elsewhere (a symlink) is
+ *  never read, written or pruned. */
+function cacheInside(root: string): boolean {
+  const base = join(root, 'design', '.local', 'bakes')
+  if (!existsSync(base)) return true
+  try { return realpathSync(base).startsWith(realpathSync(root) + sep) } catch { return false }
+}
+
 function readCached(root: string, gen: number, ask: BakeAsk, urlBase: string): BakeAnswer | null {
   const key = bakeKey(ask)
   const dir = cacheDir(root, gen, key)
   try {
     const meta = JSON.parse(readFileSync(join(dir, 'bake.json'), 'utf8')) as { targets: BakeTarget[]; levels: number; rejected: number; ms: number }
+    try { const now = new Date(); utimesSync(dir, now, now) } catch { /* recency is best-effort */ }
     return { ...ask, ok: true, targets: meta.targets.map((t) => ({ ...t, texture: t.verified ? `${urlBase}/${gen}/${key}/${t.texture}` : '' })), levels: meta.levels, rejected: meta.rejected, ms: 0 }
   } catch { return null }
 }
 
-function writeCached(root: string, gen: number, ask: BakeAsk, r: Extract<BakeResult, { ok: true }>, urlBase: string): BakeAnswer {
+function writeCached(root: string, gen: number, ask: BakeAsk, r: Extract<BakeResult, { ok: true }>, urlBase: string, protect: Set<string>): BakeAnswer {
   const key = bakeKey(ask)
   const dir = cacheDir(root, gen, key)
-  // bounded: at most KEYS_PER_GEN compiled sizes and themes per generation, the oldest evicted
+  // bounded: at most KEYS_PER_GEN compiled sizes and themes per generation, the least recently
+  // used evicted - never one the current response names
   try {
     const gdir = join(root, 'design', '.local', 'bakes', String(gen))
-    const names = readdirSync(gdir).filter((n) => !n.includes('.tmp-') && n !== key)
+    const names = readdirSync(gdir).filter((n) => !n.includes('.tmp-') && n !== key && !protect.has(n))
     if (names.length >= KEYS_PER_GEN) names.map((n) => ({ n, t: statSync(join(gdir, n)).mtimeMs })).sort((a, b) => a.t - b.t).slice(0, names.length - KEYS_PER_GEN + 1).forEach(({ n }) => rmSync(join(gdir, n), { recursive: true, force: true }))
   } catch { /* no generation directory yet */ }
   const tmp = `${dir}.tmp-${process.pid}`
@@ -413,14 +426,14 @@ function writeCached(root: string, gen: number, ask: BakeAsk, r: Extract<BakeRes
   })
   writeFileSync(join(tmp, 'bake.json'), JSON.stringify({ targets, levels: r.levels, rejected: r.rejected, ms: r.ms }))
   rmSync(dir, { recursive: true, force: true })
-  try { renameSync(tmp, dir) } catch { rmSync(tmp, { recursive: true, force: true }) }
+  try { renameSync(tmp, dir) } catch (e) { rmSync(tmp, { recursive: true, force: true }); throw new Error(`could not write the compiled frame: ${(e as Error).message}`) }
   return { ...ask, ok: true, targets: targets.map((t) => ({ ...t, texture: t.verified ? `${urlBase}/${gen}/${key}/${t.texture}` : '' })), levels: r.levels, rejected: r.rejected, ms: r.ms }
 }
 
 /** Drop every generation but the current one (called when the generation bumps). */
 export function pruneBakes(root: string, keep: number): void {
   const base = join(root, 'design', '.local', 'bakes')
-  if (!existsSync(base)) return
+  if (!existsSync(base) || !cacheInside(root)) return
   try {
     for (const name of readdirSync(base)) {
       if (name !== String(keep)) rmSync(join(base, name), { recursive: true, force: true })
@@ -437,9 +450,11 @@ const inflight = new Map<string, Promise<BakeAnswer>>()
  *  `live()` is the source generation NOW - a compile the source outran is not published. */
 export async function bakeBatch(opts: { root: string; gen: number; asks: BakeAsk[]; urlFor: (ask: BakeAsk) => string; urlBase: string; live?: () => number; log?: (a: BakeAnswer) => void }): Promise<BakeAnswer[]> {
   const { root, gen, asks, urlFor, urlBase, live, log } = opts
+  if (!cacheInside(root)) return asks.map((ask) => ({ ...ask, ok: false as const, error: 'design/.local/bakes resolves outside the project' }))
   const answers: (BakeAnswer | null)[] = asks.map((ask) => readCached(root, gen, ask, urlBase))
+  const protect = new Set(asks.map(bakeKey))   // keys this response names: never evicted under it
   const misses = new Map<string, { ask: BakeAsk; at: number[] }>()
-  asks.forEach((ask, i) => { if (answers[i]) return; const k = `${gen}|${bakeKey(ask)}`; const m = misses.get(k); if (m) m.at.push(i); else misses.set(k, { ask, at: [i] }) })
+  asks.forEach((ask, i) => { if (answers[i]) return; const k = `${root}|${gen}|${bakeKey(ask)}`; const m = misses.get(k); if (m) m.at.push(i); else misses.set(k, { ask, at: [i] }) })
   const mine: { ask: BakeAsk; resolve: (a: BakeAnswer) => void; done: boolean }[] = []
   const waits = [...misses.entries()].map(([k, m]) => {
     let p = inflight.get(k)
@@ -458,7 +473,8 @@ export async function bakeBatch(opts: { root: string; gen: number; asks: BakeAsk
         if (cached) return settle(job, cached)
         const r = await bakeIn(b, { url: urlFor(job.ask), width: Math.round(job.ask.w), height: Math.round(job.ask.h) }).catch((e) => ({ ok: false as const, error: (e as Error).message }))
         if (live && live() !== gen) return settle(job, { ...job.ask, ok: false, error: 'the source changed during the compile' })
-        const a = r.ok ? writeCached(root, gen, job.ask, r, urlBase) : { ...job.ask, ...r }
+        let a: BakeAnswer
+        try { a = r.ok ? writeCached(root, gen, job.ask, r, urlBase, protect) : { ...job.ask, ...r } } catch (e) { a = { ...job.ask, ok: false, error: (e as Error).message } }
         log?.(a)
         settle(job, a)
       }))

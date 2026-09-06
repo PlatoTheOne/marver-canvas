@@ -44,6 +44,9 @@ const asleep = new Map<string, { key: string; doc: Document }>()
 /** The node's current request, so a stale answer (a newer sleep, a wake in between) is dropped. */
 const pending = new Map<string, number>()
 let seq = 0
+/** Nodes with one retry of a failed compile in flight. */
+const retried = new Set<string>()
+const RETRY_MS = 4000
 
 /** Does this document have anything to compile? Cheap: one computed style per element. */
 export function hasEffects(doc: Document): boolean {
@@ -113,7 +116,10 @@ export async function sleep(nodeKey: string, iframe: HTMLIFrameElement, key: Sle
   if (!current()) return 'live'
   if (decoded.some((ok) => !ok)) targets = []
   if (!install(doc, targets)) return 'live'
-  asleep.set(nodeKey, { key: k, doc })
+  // a certified sleep is remembered; the pause-only fallback is not, so the next lifecycle event
+  // asks again (a compile the source outran, a server hiccup), and one retry is scheduled now
+  if (targets.length) asleep.set(nodeKey, { key: k, doc })
+  else if (!retried.has(nodeKey)) { retried.add(nodeKey); setTimeout(() => { retried.delete(nodeKey); if (current()) void sleep(nodeKey, iframe, key) }, RETRY_MS) }
   return 'asleep'
 }
 
@@ -124,12 +130,15 @@ export function wake(nodeKey: string, iframe: HTMLIFrameElement | null): void {
   const doc = iframe?.contentDocument
   const st = doc?.getElementById(STYLE_ID)
   if (!doc || !st) return
-  // the effects return under `transition: none`, computed NOW (a forced style recalc is a style
-  // change event); then the rule and the attributes go, with no property left to animate
-  st.textContent = `[data-mv-sleep]{transition:none!important}`
-  void doc.documentElement.offsetWidth
+  // the effects return under an INLINE important `transition: none` (it outranks any authored
+  // important transition), computed NOW - a forced style recalc is a style change event; then the
+  // rule, the attributes and the inline suppression go, with no property left to animate
+  const els = [...doc.querySelectorAll<HTMLElement>('[data-mv-sleep]')]
+  const authored = els.map((el) => [el.style.getPropertyValue('transition'), el.style.getPropertyPriority('transition')] as const)
+  for (const el of els) el.style.setProperty('transition', 'none', 'important')
   st.remove()
-  doc.querySelectorAll('[data-mv-sleep]').forEach((el) => el.removeAttribute('data-mv-sleep'))
+  void doc.documentElement.offsetWidth
+  els.forEach((el, i) => { const [v, p] = authored[i]; if (v) el.style.setProperty('transition', v, p); else el.style.removeProperty('transition'); el.removeAttribute('data-mv-sleep') })
 }
 
 /** Install the override for the targets. All or nothing: a target whose element is not exactly the
