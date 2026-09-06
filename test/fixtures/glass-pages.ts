@@ -1,0 +1,22 @@
+/** Synthetic glass pages for the compiler tests (bake.test.ts) - served from memory, 600x400. */
+export const PILL = 'position:absolute;left:100px;top:100px;width:240px;height:60px;border-radius:30px;background:rgba(255,255,255,.35);border:1px solid rgba(255,255,255,.5);font:600 18px/58px system-ui;text-align:center;color:#123'
+const page = (body: string, head = '') => `<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;width:600px;height:400px;overflow:hidden}
+  body{background:linear-gradient(135deg,#ff7a59 0%,#7b61ff 45%,#19c2a0 100%)}
+  .glass{backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+  ${head}</style></head><body><div id="root">${body}</div></body></html>`
+
+export const PAGES: Record<string, string> = {
+  plain: page(`<div id="box" style="${PILL}">no glass here</div>`),
+  glass: page(`<div id="pill" class="glass" style="${PILL}">Past due</div>`),
+  nested: page(`<div id="panel" class="glass" style="position:absolute;left:60px;top:60px;width:400px;height:260px;border-radius:16px;background:rgba(0,0,0,.25)">
+    <div id="pill" style="${PILL};backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)">inside the panel</div></div>`),
+  later: page(`<div id="a" class="glass" style="${PILL}">first</div><div id="b" class="glass" style="${PILL};left:220px;top:130px">painted later, over the first</div>`),
+  opacity: page(`<div id="pill" class="glass" style="${PILL};opacity:.5 !important">half there</div>`),
+  // a backdrop that never settles: the compiler must refuse rather than certify a moving target
+  restless: page(`<div id="pill" class="glass" style="${PILL}">restless</div><script>let h=0;(function tick(){document.body.style.background='linear-gradient(135deg,hsl('+(h++%360)+' 90% 60%),#7b61ff)';requestAnimationFrame(tick)})()</script>`),
+  // a blend mode composes the element with what is behind it: a texture underneath is not the same picture
+  blend: page(`<div id="pill" class="glass" style="${PILL};mix-blend-mode:multiply;background:rgba(255,200,120,.7)">multiplied</div>`),
+  // the override's own style element is what moves a box here: the geometry guard must reject everything
+  moving: page(`<div id="pill" class="glass" style="${PILL}">moves under the override</div>`, 'html:has(#mv-bake-style) #pill{margin-left:7px}'),
+}

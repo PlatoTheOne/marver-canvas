@@ -175,7 +175,8 @@ describe('slides in a real published browser', () => {
       })
     `)
     for (const a of audit) expect(a.slept).toBe(true)
-    // a slide has no backdrop-filter to compile: its sleep is the animation pause alone
+    // a published canvas has no compiler: every slide's sleep is the animation pause alone (the
+    // video's glass play button stays live)
     for (const a of audit) expect(a.textures).toBe(0)
     // the chart really rendered (as SVG) rather than silently not mounting
     expect(audit.some((a: { svgs: number }) => a.svgs > 0)).toBe(true)

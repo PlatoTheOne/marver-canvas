@@ -36,6 +36,10 @@ only around published boards (a folder with nothing published never reaches the 
 and `title`s and `description`s ship only for published things - the project's, the
 published boards', their folders', scenes' and frames'.
 
+A published canvas has no compiler (its image ships no Chrome): frames rest with their animations
+paused and their glass live, exactly as before 0.18.0. The certified textures that make a hi-fi
+board pan like statics are a dev-canvas feature.
+
 ## Who can open your canvas
 
 Three choices, and the canvas is public until you make one.

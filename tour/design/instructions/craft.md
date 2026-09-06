@@ -138,3 +138,12 @@ app, and the human attributes the fault to your frame, not to a library.
   WILL sweep devices with keys 1-5.
 - Live fully inside the settled visual world. A direction executed at full commitment
   can be judged and improved; a hedged one can only be redone.
+
+## Glass on the canvas
+
+While a frame rests on the canvas, marver compiles every `backdrop-filter` element into a still
+texture of its own filtered backdrop, certified pixel by pixel, so a board of hi-fi glass pans
+like a board of statics; the frame wakes the moment it is interacted with. Three things cannot
+be compiled and stay live: glass inside glass, a glass element with a `mix-blend-mode`, and a
+frame whose paint at rest is not a function of its URL (random data at boot, a clock, a
+count-up). Use them on the one frame that needs them, not as a house style.

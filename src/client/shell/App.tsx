@@ -550,6 +550,9 @@ export function App() {
         // sh:measure does, so a stale ready never marks a reloading frame ready.
         const gen = el.src.match(/[?&]r=(\d+)/)?.[1] ?? ''
         if (String(data.gen ?? '') !== gen) return
+        // a document that loaded again on its own (a full reload) is a new source revision: the
+        // sleeping override of the previous document must not be trusted for this one
+        if (s.nodes.find((n) => n.key === nodeKey)?.status === 'ready') s.bumpRev(nodeKey)
         s.setStatus(nodeKey, 'ready')
       } else if (data.type === 'sh:error') {
         s.setStatus(nodeKey, 'error', String(data.message ?? 'unknown error'))

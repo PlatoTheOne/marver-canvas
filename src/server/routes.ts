@@ -1,6 +1,6 @@
 import type { Connect, ViteDevServer } from 'vite'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync, realpathSync } from 'node:fs'
+import { join, sep } from 'node:path'
 import { ROUTE } from '../cli/name.ts'
 
 /**
@@ -44,7 +44,11 @@ export function routesMiddleware(server: ViteDevServer, clientDir: string): Conn
       const m = /^\/(\d+)\/([a-f0-9]{16})\/(\d+)\.png$/.exec(path.slice(`${ROUTE}/bakes`.length))
       if (!m) { res.statusCode = 404; return res.end() }
       try {
-        const png = readFileSync(join(server.config.root, 'design', '.local', 'bakes', m[1], m[2], `${m[3]}.png`))
+        // real paths: a symlink planted inside the cache must not reach out of it
+        const base = realpathSync(join(server.config.root, 'design', '.local', 'bakes'))
+        const file = realpathSync(join(base, m[1], m[2], `${m[3]}.png`))
+        if (!file.startsWith(base + sep)) throw new Error('outside the cache')
+        const png = readFileSync(file)
         res.setHeader('content-type', 'image/png'); res.setHeader('cache-control', 'public, max-age=31536000, immutable')
         return res.end(png)
       } catch { res.statusCode = 404; return res.end() }

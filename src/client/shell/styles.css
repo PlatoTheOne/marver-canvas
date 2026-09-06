@@ -151,7 +151,8 @@ button svg { pointer-events: none }   /* event targets stay on the button - pan 
 .sh-content { will-change: auto }
 #sh-world { position: relative; width: 1px; height: 1px }
 #sh-world.sh-gesturing .sh-live { pointer-events: none }          /* law G-4 */
-.sh-gesturing .sh-content { will-change: transform }              /* law G-3: gesture-scoped only */
+/* no gesture promotion (a will-change layer on the world was measured harmful: 18-29 dropped frames
+   per pan on a 32-frame board against 0-3 without, spec 16) */
 /* preset transitions: armed by animateLayout() around device/tidy mutations - nodes ease
    to their new frame on the same 320ms ease-out the camera fit animates with */
 #sh-world.sh-preset .sh-node { transition: transform .32s cubic-bezier(.25,.46,.45,.94),

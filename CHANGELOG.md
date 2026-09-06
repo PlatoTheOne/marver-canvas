@@ -2,6 +2,38 @@
 
 Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 
+## 0.18.0 - 2026-09-06
+
+### Changed
+
+- **Hi-fi frames at rest sleep in place.** A frame on the canvas is one live document, awake
+  or asleep - the DOM-snapshot "lean" cover of earlier releases is gone. At rest, its CSS
+  animations pause and every `backdrop-filter` element (the glass that made a 4-frame hi-fi
+  board checkerboard at 20-70 % zoom) wears a static texture of its own filtered backdrop,
+  computed and certified pixel by pixel by the dev server in headless Chrome, under
+  `backdrop-filter: blur(0px)`. Interact mode wakes the frame by removing one `<style>`; laser,
+  comment pins and selection work on the sleeping document as it is. Nothing is copied, so
+  nothing can shift at the transition: measured on real frames at 200 % zoom, 29 pixels of
+  5.2 million differ from the live paint by more than 8 levels, none by more than 32.
+  Markdown, image, slide and lo-fi frames have nothing to compile and never ask the server.
+- Theme flips and resizes wake the frame first and sleep it again once it has settled at the
+  new theme or size; an edit (HMR) or a reload does the same under a new source generation, so
+  a texture can never outlive the source it describes.
+
+### Added
+
+- `POST /__mv/api/bakes` (owner-gated) compiles frames in batch; textures are cached on disk
+  under `design/.local/bakes/<generation>/` and served immutable. Identical asks share one
+  compile; a compile the source outran is dropped.
+
+### Caveats
+
+- Only the dev canvas compiles (it needs Chrome): published canvases sleep with the animation
+  pause alone, their glass live as before.
+- Glass inside glass, a glass element with a blend mode, and any frame whose paint at rest is
+  not a function of its URL (random data at boot, a clock) stay live - the compiler refuses
+  what it cannot certify, and `?awake=1` on the canvas URL keeps every frame live for comparison.
+
 ## 0.17.0 - 2026-09-04
 
 ### Added

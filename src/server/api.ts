@@ -464,30 +464,30 @@ export function apiMiddleware(root: string, opts: { viewports?: Record<string, {
         if (!ownerGated(req)) return json(res, 403, { error: 'forbidden' })
         const raw = await readBody(req)
         if (raw == null) return json(res, 400, { error: 'body too large or unreadable' })
-        let body: { asks?: unknown }
+        let body: { asks?: unknown } | null
         try { body = JSON.parse(raw) } catch { return json(res, 400, { error: 'malformed JSON' }) }
-        if (!Array.isArray(body.asks) || !body.asks.length || body.asks.length > 200) return json(res, 400, { error: 'asks must list 1-200 frames' })
+        if (!body || typeof body !== 'object' || !Array.isArray(body.asks) || !body.asks.length || body.asks.length > 200) return json(res, 400, { error: 'asks must list 1-200 frames' })
+        const { bakeBatch, ASK_MAX } = await import('./bake.ts')
         let manifest: { frames?: { id: string; file: string; kind: string }[] } = {}
         try { manifest = JSON.parse(readFileSync(join(root, 'design', 'manifest.json'), 'utf8')) } catch { /* no manifest yet */ }
         const frames = new Map((manifest.frames ?? []).map((f) => [f.id, f]))
         const asks: { frame: string; theme: string; w: number; h: number }[] = []
         for (const a of body.asks as Record<string, unknown>[]) {
           const frame = typeof a?.frame === 'string' ? a.frame : ''
-          const theme = typeof a?.theme === 'string' && /^[a-z0-9-]+$/i.test(a.theme) ? a.theme : ''
+          const theme = typeof a?.theme === 'string' && /^[a-z0-9-]{1,32}$/i.test(a.theme) ? a.theme : ''
           const w = Math.round(Number(a?.w)), h = Math.round(Number(a?.h))
-          if (!frames.has(frame) || !theme || !(w >= 120 && w <= 3840 && h >= 80 && h <= 16384)) return json(res, 400, { error: `invalid ask for "${frame}"` })
+          if (!frames.has(frame) || !theme || !(w >= 120 && h >= 80 && w <= ASK_MAX.side && h <= ASK_MAX.side && w * h <= ASK_MAX.area)) return json(res, 400, { error: `invalid ask for "${frame}"` })
           asks.push({ frame, theme, w, h })
         }
         const origin = opts.origin?.() ?? `http://${req.headers.host ?? 'localhost'}`
         const { ROUTE } = await import('../cli/name.ts')
-        const { bakeBatch } = await import('./bake.ts')
         const gen = opts.bakeGen?.() ?? 0
         const answers = await bakeBatch({
-          root, gen, asks,
+          root, gen, asks, live: () => opts.bakeGen?.() ?? 0,
+          log: (a) => { if (a.ok) console.log(`  bake: ${a.frame} ${a.theme} ${a.w}x${a.h} - ${a.targets.length} effects, ${a.rejected} stay live, ${a.ms} ms`); else console.log(`  bake: ${a.frame} ${a.theme} ${a.w}x${a.h} - stays live: ${a.error}`) },
           urlFor: (ask) => { const f = frames.get(ask.frame)!; return f.kind === 'html' ? `${origin}/${f.file}?theme=${encodeURIComponent(ask.theme)}` : `${origin}${ROUTE}/frame/?id=${encodeURIComponent(ask.frame)}&theme=${encodeURIComponent(ask.theme)}` },
           urlBase: `${ROUTE}/bakes`,
         })
-        for (const a of answers) if (a.ok && a.ms) console.log(`  bake: ${a.frame} ${a.theme} ${a.w}x${a.h} - ${a.targets.length} effects, ${a.rejected} stay live, ${a.ms} ms`)
         return json(res, 200, { gen, answers })
       }
 

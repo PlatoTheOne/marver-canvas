@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { cap, frameUrl, useStore, CONFIG, type Node } from '../store.ts'
 import { CopyIcon, IntentGlyph, ParallelogramFillIcon, ReloadIcon, SlideFrameIcon, XIcon } from '../icons.tsx'
 import { CommentLayer } from '../Comments.tsx'
@@ -129,7 +129,9 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
   const [resizeTick, setResizeTick] = useState(0)
   useEffect(() => { dirty.current = false }, [node.nav])   // a fresh document is pristine again
   const w = Math.round(node.w), h = Math.round(node.h)
-  useEffect(() => {
+  // a layout effect: the wake lands BEFORE the first paint of the new state (a stretched texture
+  // must never be painted at a new size)
+  useLayoutEffect(() => {
     const iframe = iframeRef.current
     if (!iframe || !frame || node.missing) return
     if (interact) dirty.current = true
@@ -232,7 +234,7 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
       gesturing = true
       world.classList.add('sh-gesturing')   // drops iframe pointer-events
       setGesture(true)
-      if (mode !== 'move') { resizing.current = true; setResizeTick((t) => t + 1) }   // awake for the whole resize
+      if (mode !== 'move') { resizing.current = true; wake(node.key, iframeRef.current); setResizeTick((t) => t + 1) }   // awake before the first resized paint, for the whole resize
     }
     const MOVE_THRESHOLD = 3   // px in screen space before a press counts as a drag
 

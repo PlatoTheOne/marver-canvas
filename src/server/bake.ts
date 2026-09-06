@@ -30,10 +30,11 @@
  * background layers. Nothing else on the element; layout is never touched.
  */
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Browser } from './cdp.ts'
-import { pool, shotConcurrency, withBrowser } from './shot.ts'
+import { AREA, SURFACE, pool, shotConcurrency, withBrowser } from './shot.ts'
+import { readOwn, sleepRule } from '../shared/sleep-rule.ts'
 
 export interface BakeTarget {
   sel: string
@@ -55,6 +56,10 @@ const DSF = 2
  *  (29 px > 8 of 5.18 M, none > 32) at a quarter of the memory; 0.5x fails on 30 px pills. */
 const TEXTURE_DSF = 1
 const DEADLINE_MS = 45_000
+/** The largest frame an ask may name, in CSS px: the shot pipeline's bitmap budget at DPR 2. */
+export const ASK_MAX = { side: Math.floor(SURFACE / DSF), area: Math.floor(AREA / (DSF * DSF)) }
+const MAX_TARGETS = 200
+const KEYS_PER_GEN = 400
 
 /** Runs INSIDE the frame document: the effect census and the paint-order levelling. Assigns
  *  data-mv-bake ids so later passes address elements without re-walking. */
@@ -70,17 +75,26 @@ const DETECT = `(() => {
     }
     return seg.join('>')
   }
-  const out = []
-  let i = 0
+  const glass = []
   for (const el of document.querySelectorAll('*')) {
     const cs = getComputedStyle(el)
     const bf = cs.backdropFilter || cs.webkitBackdropFilter
     if (!bf || bf === 'none') continue
     const r = el.getBoundingClientRect()
     if (r.width < 1 || r.height < 1) continue
+    el.setAttribute('data-mv-glass', '')
+    glass.push({ el, bf, r })
+  }
+  // glass inside glass: the inner element reads its ancestor's UNFILTERED backdrop (measured in
+  // Chrome 152), which no texture on either of them reproduces - both stay live
+  const out = []
+  let i = 0
+  for (const { el, bf, r } of glass) {
+    if ((el.parentElement && el.parentElement.closest('[data-mv-glass]')) || el.querySelector('[data-mv-glass]')) continue
     el.setAttribute('data-mv-bake', String(i))
     out.push({ i: i++, sel: sel(el), rect: { x: r.x, y: r.y, w: r.width, h: r.height }, filter: bf })
   }
+  for (const { el } of glass) el.removeAttribute('data-mv-glass')
   const level = new Array(out.length).fill(0)
   const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
   for (let k = 0; k < out.length; k++) for (let j = 0; j < k; j++) if (hit(out[k].rect, out[j].rect)) level[k] = Math.max(level[k], level[j] + 1)
@@ -91,6 +105,8 @@ const DETECT = `(() => {
  *  inline declaration remembered and restored exactly), show the rest, apply \`bakes\` as the
  *  override the shell will use. */
 const APPLY = `((level, bakes) => {
+  const readOwn = ${readOwn.toString()}
+  const sleepRule = ${sleepRule.toString()}
   let st = document.getElementById('mv-bake-style')
   if (!st) { st = document.createElement('style'); st.id = 'mv-bake-style'; document.head.appendChild(st) }
   const rules = []
@@ -98,20 +114,10 @@ const APPLY = `((level, bakes) => {
     const i = el.getAttribute('data-mv-bake')
     const b = bakes.find((x) => String(x.i) === i)
     if (!b) continue
-    const cs = getComputedStyle(el)
-    const own = el.dataset.mvOwn ? JSON.parse(el.dataset.mvOwn) : null
     // the element's OWN background, read once before any override touches it
-    const o = own || { img: cs.backgroundImage, color: cs.backgroundColor, size: cs.backgroundSize, pos: cs.backgroundPosition, rep: cs.backgroundRepeat, org: cs.backgroundOrigin, clip: cs.backgroundClip }
-    if (!own) el.dataset.mvOwn = JSON.stringify(o)
-    const img = o.img === 'none' ? '' : o.img + ','
-    rules.push('[data-mv-bake="' + i + '"]{backdrop-filter:blur(0px)!important;-webkit-backdrop-filter:blur(0px)!important;' +
-      'background-color:transparent!important;' +
-      'background-image:' + img + 'linear-gradient(' + o.color + ',' + o.color + '),url("' + b.texture + '")!important;' +
-      'background-size:' + (img ? o.size + ',' : '') + 'auto,100% 100%!important;' +
-      'background-position:' + (img ? o.pos + ',' : '') + '0 0,0 0!important;' +
-      'background-repeat:' + (img ? o.rep + ',' : '') + 'no-repeat,no-repeat!important;' +
-      'background-origin:' + (img ? o.org + ',' : '') + 'border-box,border-box!important;' +
-      'background-clip:' + (img ? o.clip + ',' : '') + 'border-box,border-box!important}')
+    const own = el.dataset.mvOwn ? JSON.parse(el.dataset.mvOwn) : readOwn(getComputedStyle(el))
+    if (!el.dataset.mvOwn) el.dataset.mvOwn = JSON.stringify(own)
+    rules.push(sleepRule('[data-mv-bake="' + i + '"]', own, b.texture))
   }
   st.textContent = rules.join('\\n')
   for (const el of document.querySelectorAll('[data-mv-bake]')) {
@@ -181,6 +187,17 @@ const SLICE = `((shot) => new Promise((res) => { const im = new Image(); im.onlo
   res(out)
 }; im.src = 'data:image/png;base64,' + shot }))`
 
+/** Runs in the frame page: are two captures the same picture within GPU dither (no channel differs by more than 2)? */
+const NEAR = `((a, b) => (async () => {
+  const load = (d) => new Promise((r) => { const im = new Image(); im.onload = () => r(im); im.src = 'data:image/png;base64,' + d })
+  const [ia, ib] = await Promise.all([load(a), load(b)])
+  const px = (im) => { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(im, 0, 0); return g.getImageData(0, 0, c.width, c.height).data }
+  const A = px(ia), B = px(ib)
+  if (A.length !== B.length) return false
+  for (let i = 0; i < A.length; i++) if (Math.abs(A[i] - B[i]) > 2) return false
+  return true
+})())`
+
 /** Runs in the frame page: diff \`baked\` against \`reference\` inside each target's rounded shape. */
 const CERTIFY = `((reference, baked, rects, width) => (async () => {
   const load = (d) => new Promise((r) => { const im = new Image(); im.onload = () => r(im); im.src = 'data:image/png;base64,' + d })
@@ -200,19 +217,25 @@ const CERTIFY = `((reference, baked, rects, width) => (async () => {
       const dx = x + 0.5 - cx[c], dy = y + 0.5 - cy[c]
       return dx * dx + dy * dy <= R[c] * R[c]
     }
-    let maxErr = 0, bad = 0, n = 0
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
-      if (!inside(x, y)) continue
+    // the perimeter - the box minus the eroded shape - is where a composited edge and an inline
+    // edge differ by an anti-aliasing halo; a tint painted into a transparent border shows there
+    // as a solid band, so it has its own, looser gate
+    const X0 = Math.max(0, Math.floor(t.rect.x * k)), Y0 = Math.max(0, Math.floor(t.rect.y * k))
+    const X1 = Math.min(A.w, Math.ceil((t.rect.x + t.rect.w) * k)), Y1 = Math.min(A.h, Math.ceil((t.rect.y + t.rect.h) * k))
+    let maxErr = 0, bad = 0, n = 0, ringBad = 0, ringN = 0
+    for (let y = Y0; y < Y1; y++) for (let x = X0; x < X1; x++) {
       const i = (y * A.w + x) * 4
       const d = Math.max(Math.abs(A.d[i] - B.d[i]), Math.abs(A.d[i+1] - B.d[i+1]), Math.abs(A.d[i+2] - B.d[i+2]))
-      if (d > maxErr) maxErr = d; if (d > 8) bad++; n++
+      if (x >= x0 && x < x1 && y >= y0 && y < y1 && inside(x, y)) { if (d > maxErr) maxErr = d; if (d > 8) bad++; n++ }
+      else { if (d > 48) ringBad++; ringN++ }
     }
-    return { maxErr, bad, n }
+    return { maxErr, bad, n, ringBad, ringN }
   })
 })())`
 
-const passes = (v: { maxErr: number; bad: number; n: number } | undefined): boolean =>
-  !!v && v.n >= 64 && v.maxErr <= 32 && v.bad <= Math.max(v.n >= 2000 ? 4 : 0, v.n * 0.005)
+type Verdict = { maxErr: number; bad: number; n: number; ringBad: number; ringN: number }
+const passes = (v: Verdict | undefined): boolean =>
+  !!v && v.n >= 64 && v.maxErr <= 32 && v.bad <= v.n * 0.005 && v.ringBad <= v.ringN * 0.05
 
 /** Compile one frame inside a browser the caller owns. */
 export async function bakeIn(b: Browser, opts: { url: string; width: number; height: number }): Promise<BakeResult> {
@@ -221,6 +244,8 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
   const me = {}
   let targetId: string | undefined
   const deadline = setTimeout(() => b.abort(me, 'the bake timed out'), DEADLINE_MS)
+  // a close that cannot hang the operation: bounded, outside the abort owner
+  const closeTarget = async (id: string) => { let t: ReturnType<typeof setTimeout> | undefined; await Promise.race([b.send('Target.closeTarget', { targetId: id }).catch(() => {}), new Promise((r) => { t = setTimeout(r, 2000) })]); clearTimeout(t) }
   try {
     targetId = (await b.send('Target.createTarget', { url: 'about:blank' }, undefined, me)).targetId
     const sessionId = (await b.send('Target.attachToTarget', { targetId, flatten: true }, undefined, me)).sessionId as string
@@ -235,12 +260,15 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
     if (nav?.errorText && nav.errorText !== 'net::ERR_ABORTED') return { ok: false, error: `could not load the frame (${nav.errorText})` }
     // settle: readiness, fonts, in-view images + the frame's own async signals, SVG images, animations, quiet
     const readyBy = Date.now() + 30_000
-    while (Date.now() < readyBy) {
-      if (await ev(`(() => { const el = document.getElementById('root') ?? document.body; return !!el && el.childElementCount > 0 && document.readyState !== 'loading' })()`)) break
-      await wait(100)
+    let rendered = false
+    while (!rendered && Date.now() < readyBy) {
+      rendered = !!(await ev(`(() => { const el = document.getElementById('root') ?? document.body; return !!el && el.childElementCount > 0 && document.readyState !== 'loading' })()`))
+      if (!rendered) await wait(100)
     }
+    if (!rendered) return { ok: false, error: 'the frame never rendered' }
     await ev(`document.fonts.ready.then(() => true)`, true)
-    await ev(`new Promise((r) => { const t = Date.now(); const tick = () => {
+    // fail closed: a frame still loading images or charts after the budget is not a frame to certify
+    const unsettled = await ev(`new Promise((r) => { const t = Date.now(); const tick = () => {
       const H = innerHeight, W = innerWidth
       let pending = 0
       if (typeof window.__mvLodBusy === 'function' && window.__mvLodBusy() > 0) pending++
@@ -248,7 +276,8 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
       for (const im of document.images) { if (im.complete) continue; const b = im.getBoundingClientRect(); if (b.bottom < 0 || b.top > H || b.right < 0 || b.left > W) continue; pending++ }
       for (const c of document.querySelectorAll('.mv-chart')) if (!c.querySelector('svg, canvas')) pending++
       for (const d of document.querySelectorAll('.mv-diagram')) if (!d.querySelector('.mv-diagram-svg svg, .mv-diagram-err')) pending++
-      if (!pending || Date.now() - t > 6000) r(true); else setTimeout(tick, 60) }; tick() })`, true)
+      if (!pending || Date.now() - t > 6000) r(pending); else setTimeout(tick, 60) }; tick() })`, true)
+    if (unsettled) return { ok: false, error: `the frame did not settle (${unsettled} image(s) or chart(s) still loading)` }
     await ev(`Promise.all(Array.from(document.querySelectorAll('image')).map((el) => { const href = el.getAttribute('href') || el.getAttribute('xlink:href'); if (!href) return 1; const im = new Image(); im.src = new URL(href, location.href).href; return im.decode().catch(() => 1) })).then(() => true)`, true)
     await ev(`Promise.race([Promise.all(document.getAnimations().map((a) => a.finished.catch(() => 1))), new Promise((r) => setTimeout(r, 5000))]).then(() => true)`, true)
     await ev(`new Promise((resolve) => { let timer = 0; const done = () => { mo.disconnect(); resolve(true) }; const mo = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(done, 250) }); mo.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true }); timer = setTimeout(done, 250); setTimeout(done, 3000) })`, true)
@@ -258,6 +287,7 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
 
     const targets = (await ev(`(window.__mvBakeTargets = ${DETECT})`)) as { i: number; sel: string; rect: BakeTarget['rect']; filter: string; level: number }[]
     if (!targets?.length) return { ok: true, targets: [], levels: 0, rejected: 0, ms: Date.now() - t0 }
+    if (targets.length > MAX_TARGETS) return { ok: false, error: `too many effects to compile (${targets.length})` }
     const levels = Math.max(...targets.map((t) => t.level)) + 1
     const geometryBefore = (await ev(GEOMETRY)) as number[][]
 
@@ -265,9 +295,15 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
     await ev(`${APPLY}(0, [])`); await ev(PAINTED, true)
     await ev(`${APPLY}(${levels}, [])`); await ev(PAINTED, true)
     await wait(300)
+    // stable = two consecutive captures within GPU dither (a gradient rasters with 1-level noise
+    // from frame to frame; certification tolerates far more than that)
     let reference = await capture(), stable = false
-    for (let i = 0; i < 8; i++) { await wait(400); const again = await capture(); if (again === reference) { stable = true; break }; reference = again }
-    if (!stable) return { ok: false, error: 'the frame never stopped changing - nothing to certify against' }
+    let previous = ''
+    for (let i = 0; i < 8; i++) { await wait(400); const again = await capture(); if (again === reference || (await ev(`${NEAR}(${JSON.stringify(reference)}, ${JSON.stringify(again)})`, true))) { stable = true; break }; previous = reference; reference = again }
+    if (!stable) {
+      if (process.env.MV_BAKE_DEBUG) { mkdirSync(process.env.MV_BAKE_DEBUG, { recursive: true }); writeFileSync(join(process.env.MV_BAKE_DEBUG, `unstable-a-${Date.now()}.png`), Buffer.from(previous, 'base64')); writeFileSync(join(process.env.MV_BAKE_DEBUG, `unstable-b-${Date.now()}.png`), Buffer.from(reference, 'base64')) }
+      return { ok: false, error: 'the frame never stopped changing - nothing to certify against' }
+    }
 
     const bakes: { i: number; texture: string }[] = []
     const done = new Map<number, BakeTarget>()
@@ -294,7 +330,7 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
           done.set(t.i, { sel: t.sel, rect: t.rect, filter: t.filter, level, texture, verified: false, maxErr: 255, bad: -1 })
         }
       } finally {
-        await b.send('Target.closeTarget', { targetId: ft }).catch(() => {})
+        await closeTarget(ft)
       }
     }
 
@@ -302,19 +338,22 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
     const certify = async (set: { i: number; texture: string }[]) => {
       await ev(`${APPLY}(${levels}, ${JSON.stringify(set)})`); await ev(PAINTED, true)
       const baked = await capture()
+      if (process.env.MV_BAKE_DEBUG) { const d = join(process.env.MV_BAKE_DEBUG, new URL(url).pathname.replace(/[^\w.-]+/g, '_')); mkdirSync(d, { recursive: true }); writeFileSync(join(d, 'reference.png'), Buffer.from(reference, 'base64')); writeFileSync(join(d, `baked-${set.length}.png`), Buffer.from(baked, 'base64')) }
       const rects = set.map((s) => done.get(s.i)!).map((t) => ({ sel: t.sel, rect: t.rect }))
-      return (await ev(`${CERTIFY}(${JSON.stringify(reference)}, ${JSON.stringify(baked)}, ${JSON.stringify(rects)}, ${width})`, true)) as { maxErr: number; bad: number; n: number }[]
+      return (await ev(`${CERTIFY}(${JSON.stringify(reference)}, ${JSON.stringify(baked)}, ${JSON.stringify(rects)}, ${width})`, true)) as Verdict[]
     }
-    let set = bakes
-    let verdicts = await certify(set)
-    set.forEach((s, k) => { const t = done.get(s.i)!; t.verified = passes(verdicts[k]); t.maxErr = verdicts[k]?.maxErr ?? 255; t.bad = verdicts[k]?.bad ?? -1 })
-    if (set.some((s) => !done.get(s.i)!.verified)) {
-      set = set.filter((s) => done.get(s.i)!.verified)
-      if (set.length) {
-        verdicts = await certify(set)
-        set.forEach((s, k) => { const t = done.get(s.i)!; t.verified = passes(verdicts[k]); t.maxErr = verdicts[k]?.maxErr ?? 255; t.bad = verdicts[k]?.bad ?? -1 })
-      }
+    // certification until the admitted set IS the composition that was rendered: a rejected
+    // neighbour changes a backdrop, so every rejection re-certifies the rest (one round per level
+    // at most; a set that never settles ships nothing)
+    let set = bakes, settled = false
+    for (let round = 0; set.length && round <= levels + 1 && !settled; round++) {
+      const verdicts = await certify(set)
+      set.forEach((s, k) => { const t = done.get(s.i)!; t.verified = passes(verdicts[k]); t.maxErr = verdicts[k]?.maxErr ?? 255; t.bad = verdicts[k]?.bad ?? -1 })
+      const next = set.filter((s) => done.get(s.i)!.verified)
+      settled = next.length === set.length
+      set = next
     }
+    if (!settled) for (const s of set) done.get(s.i)!.verified = false
     // the geometry guard: the shipped override must not move any box (a lost containing block would)
     const geometryAfter = (await ev(GEOMETRY)) as number[][]
     const moved = geometryBefore.length !== geometryAfter.length || geometryBefore.some((r, k) => r.some((v, j) => Math.abs(v - geometryAfter[k][j]) > 0.01))
@@ -326,12 +365,8 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
     return { ok: false, error: (err as Error).message }
   } finally {
     clearTimeout(deadline)
-    if (targetId && !b.dead) {
-      let t: ReturnType<typeof setTimeout> | undefined
-      await Promise.race([b.send('Target.closeTarget', { targetId }, undefined, me).catch(() => {}), new Promise((r) => { t = setTimeout(r, 2000) })])
-      clearTimeout(t)
-    }
     b.abort(me, 'the bake finished')
+    if (targetId && !b.dead) await closeTarget(targetId)
   }
 }
 
@@ -361,6 +396,12 @@ function readCached(root: string, gen: number, ask: BakeAsk, urlBase: string): B
 function writeCached(root: string, gen: number, ask: BakeAsk, r: Extract<BakeResult, { ok: true }>, urlBase: string): BakeAnswer {
   const key = bakeKey(ask)
   const dir = cacheDir(root, gen, key)
+  // bounded: at most KEYS_PER_GEN compiled sizes and themes per generation, the oldest evicted
+  try {
+    const gdir = join(root, 'design', '.local', 'bakes', String(gen))
+    const names = readdirSync(gdir).filter((n) => !n.includes('.tmp-') && n !== key)
+    if (names.length >= KEYS_PER_GEN) names.map((n) => ({ n, t: statSync(join(gdir, n)).mtimeMs })).sort((a, b) => a.t - b.t).slice(0, names.length - KEYS_PER_GEN + 1).forEach(({ n }) => rmSync(join(gdir, n), { recursive: true, force: true }))
+  } catch { /* no generation directory yet */ }
   const tmp = `${dir}.tmp-${process.pid}`
   rmSync(tmp, { recursive: true, force: true })
   mkdirSync(tmp, { recursive: true })
@@ -387,18 +428,44 @@ export function pruneBakes(root: string, keep: number): void {
   } catch { /* best-effort */ }
 }
 
+/** Compiles in flight, by generation and key: identical asks - inside one request or across
+ *  concurrent ones - share one compile. */
+const inflight = new Map<string, Promise<BakeAnswer>>()
+
 /** Compile many frames as ONE operation (one browser, `shotConcurrency()` at a time), the cache
- *  first. `urlFor(ask)` gives the frame's own URL; `urlBase` is where textures are served from. */
-export async function bakeBatch(opts: { root: string; gen: number; asks: BakeAsk[]; urlFor: (ask: BakeAsk) => string; urlBase: string }): Promise<BakeAnswer[]> {
-  const { root, gen, asks, urlFor, urlBase } = opts
+ *  first. `urlFor(ask)` gives the frame's own URL; `urlBase` is where textures are served from;
+ *  `live()` is the source generation NOW - a compile the source outran is not published. */
+export async function bakeBatch(opts: { root: string; gen: number; asks: BakeAsk[]; urlFor: (ask: BakeAsk) => string; urlBase: string; live?: () => number; log?: (a: BakeAnswer) => void }): Promise<BakeAnswer[]> {
+  const { root, gen, asks, urlFor, urlBase, live, log } = opts
   const answers: (BakeAnswer | null)[] = asks.map((ask) => readCached(root, gen, ask, urlBase))
-  const misses = asks.map((ask, i) => ({ ask, i })).filter(({ i }) => !answers[i])
-  if (misses.length) {
-    const fresh = await withBrowser('shot', (b) => pool(shotConcurrency(), misses, async ({ ask }) => {
-      const r = await bakeIn(b, { url: urlFor(ask), width: Math.round(ask.w), height: Math.round(ask.h) }).catch((e) => ({ ok: false as const, error: (e as Error).message }))
-      return r.ok ? writeCached(root, gen, ask, r, urlBase) : { ...ask, ...r }
-    }))
-    misses.forEach(({ i }, k) => { answers[i] = fresh[k] })
+  const misses = new Map<string, { ask: BakeAsk; at: number[] }>()
+  asks.forEach((ask, i) => { if (answers[i]) return; const k = `${gen}|${bakeKey(ask)}`; const m = misses.get(k); if (m) m.at.push(i); else misses.set(k, { ask, at: [i] }) })
+  const mine: { ask: BakeAsk; resolve: (a: BakeAnswer) => void; done: boolean }[] = []
+  const waits = [...misses.entries()].map(([k, m]) => {
+    let p = inflight.get(k)
+    if (!p) {
+      p = new Promise<BakeAnswer>((resolve) => mine.push({ ask: m.ask, resolve, done: false }))
+      inflight.set(k, p)
+      void p.then(() => inflight.delete(k))
+    }
+    return p.then((a) => { for (const i of m.at) answers[i] = { ...a, ...m.ask } })
+  })
+  if (mine.length) {
+    const settle = (job: typeof mine[number], a: BakeAnswer) => { job.done = true; job.resolve(a) }
+    try {
+      await withBrowser('shot', (b) => pool(shotConcurrency(), mine, async (job) => {
+        const cached = readCached(root, gen, job.ask, urlBase)   // another request may have filled it since we looked
+        if (cached) return settle(job, cached)
+        const r = await bakeIn(b, { url: urlFor(job.ask), width: Math.round(job.ask.w), height: Math.round(job.ask.h) }).catch((e) => ({ ok: false as const, error: (e as Error).message }))
+        if (live && live() !== gen) return settle(job, { ...job.ask, ok: false, error: 'the source changed during the compile' })
+        const a = r.ok ? writeCached(root, gen, job.ask, r, urlBase) : { ...job.ask, ...r }
+        log?.(a)
+        settle(job, a)
+      }))
+    } catch (e) {
+      for (const job of mine) if (!job.done) settle(job, { ...job.ask, ok: false, error: (e as Error).message })
+    }
   }
+  await Promise.all(waits)
   return answers as BakeAnswer[]
 }

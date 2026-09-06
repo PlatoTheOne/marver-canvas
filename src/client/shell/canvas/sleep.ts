@@ -9,19 +9,24 @@
  *   - every `backdrop-filter` element - the one effect that reads back what is behind it on every
  *     composited frame, and the reason a glass design checkerboards at scale - gets the compositor's
  *     own filtered backdrop as a static texture under its own background layers, computed and
- *     certified by the dev server in headless Chrome (src/server/bake.ts), and
- *     `backdrop-filter: blur(0px)` (the element stays an effect layer whose surface Chrome caches;
- *     measured better than `none` on identity and on frame drops).
+ *     certified by the dev server in headless Chrome (src/server/bake.ts); the rule itself is
+ *     src/shared/sleep-rule.ts, the same one the compiler certified.
  *
  * A frame with no such element - markdown, images, slides, lo-fi - never talks to the server:
- * its sleep is the animation pause. Frames are asked in one batch per tick; textures are files with
- * immutable URLs and are decoded BEFORE the override is installed, so sleep is one paint.
+ * its sleep is the animation pause. Frames are asked in one batch per tick; the server answers from
+ * its disk cache (keyed by frame, theme, size and source generation) or compiles. Textures are
+ * decoded BEFORE the override is installed, so sleep is one paint. Without textures - no compiler
+ * (a published canvas), a compile that failed, a texture that does not decode - the frame sleeps
+ * with the pause alone and its glass stays live: never an effect layer without its texture.
  *
- * Safety: a texture is applied only to an element whose selector resolves, whose border box is the
- * one the server measured (0.02 px) and whose filter is still the one baked; anything else stays
- * live. Wake removes one <style> and the attributes.
+ * Safety: the override is all or nothing - every target's selector must resolve to an element whose
+ * border box is the one the server measured (0.02 px) and whose filter is still the one baked, or
+ * the frame stays live. Wake restores the live effects under `transition: none` (an authored
+ * transition on backdrop-filter or background must not animate out of the sleep), then removes the
+ * <style> and the attributes on the next frame.
  */
 import { ROUTE } from '../../const.ts'
+import { readOwn, sleepRule } from '../../../shared/sleep-rule.ts'
 
 export interface SleepKey { frame: string; theme: string; w: number; h: number }
 interface Target { sel: string; rect: { x: number; y: number; w: number; h: number }; filter: string; level: number; texture: string; verified: boolean }
@@ -34,17 +39,11 @@ const PAUSE = `*,*::before,*::after{animation-play-state:paused!important}`
 const csrf = () => document.cookie.match(/(?:^|; )mv_c=([^;]+)/)?.[1] ?? ''
 const keyOf = (k: SleepKey) => `${k.frame}|${k.theme}|${Math.round(k.w)}|${Math.round(k.h)}`
 
-/** What a node is asleep under, published only once its override is INSTALLED. */
-const asleep = new Map<string, string>()
+/** What a node's DOCUMENT is asleep under, published only once its override is INSTALLED. */
+const asleep = new Map<string, { key: string; doc: Document }>()
 /** The node's current request, so a stale answer (a newer sleep, a wake in between) is dropped. */
 const pending = new Map<string, number>()
 let seq = 0
-
-/** Answers by key, for the next sleep of the same frame at the same size and theme (a theme flipped
- *  back, a board revisited). Bounded; textures are URLs, so the entries are small. */
-const answers = new Map<string, Answer>()
-const ANSWERS_MAX = 400
-const remember = (k: string, a: Answer) => { answers.delete(k); answers.set(k, a); if (answers.size > ANSWERS_MAX) answers.delete(answers.keys().next().value!) }
 
 /** Does this document have anything to compile? Cheap: one computed style per element. */
 export function hasEffects(doc: Document): boolean {
@@ -60,9 +59,6 @@ export function hasEffects(doc: Document): boolean {
 const queue: { key: SleepKey; resolve: (a: Answer) => void }[] = []
 let flush: ReturnType<typeof setTimeout> | undefined
 function ask(key: SleepKey): Promise<Answer> {
-  const k = keyOf(key)
-  const have = answers.get(k)
-  if (have) return Promise.resolve(have)
   return new Promise((resolve) => {
     queue.push({ key, resolve })
     clearTimeout(flush)
@@ -80,7 +76,6 @@ function ask(key: SleepKey): Promise<Answer> {
       for (const e of byKey.values()) {
         const a = data?.answers?.find((x) => keyOf(x) === keyOf(e.key))
         const answer: Answer = a ? (a.ok ? { ok: true, targets: a.targets } : { ok: false, error: a.error }) : { ok: false, error: 'no answer' }
-        if (answer.ok) remember(keyOf(e.key), answer)
         for (const w of e.waiters) w(answer)
       }
     }, 40)
@@ -93,29 +88,32 @@ function ask(key: SleepKey): Promise<Answer> {
 export async function sleep(nodeKey: string, iframe: HTMLIFrameElement, key: SleepKey): Promise<'asleep' | 'live'> {
   if (AWAKE) return 'live'
   const k = keyOf(key)
-  if (asleep.get(nodeKey) === k) return 'asleep'
-  const mine = ++seq
-  pending.set(nodeKey, mine)
   const doc = iframe.contentDocument
   if (!doc?.body) return 'live'
+  const have = asleep.get(nodeKey)
+  if (have && have.key === k && have.doc === doc && doc.getElementById(STYLE_ID)) return 'asleep'
+  const mine = ++seq
+  pending.set(nodeKey, mine)
   const current = () => pending.get(nodeKey) === mine && iframe.contentDocument === doc
   if (!hasEffects(doc)) {
     // nothing to compile: the pause alone is this frame's sleep
     if (!current()) return 'live'
     install(doc, [])
-    asleep.set(nodeKey, k)
+    asleep.set(nodeKey, { key: k, doc })
     return 'asleep'
   }
   const answer = await ask(key)
   if (!current()) return 'live'
-  if (!answer.ok) return 'live'
-  const targets = answer.targets.filter((t) => t.verified && t.texture)
-  // decode every texture BEFORE the paint that installs them - one commit, no pop-in
-  await Promise.all(targets.map((t) => { const im = new Image(); im.src = t.texture; return im.decode().catch(() => {}) }))
+  // no compiler (a published canvas, a compile that failed): the pause alone, the glass live -
+  // never an effect layer without its texture
+  let targets = answer.ok ? answer.targets.filter((t) => t.verified && t.texture) : []
+  // decode every texture BEFORE the paint that installs them - one commit, no pop-in; one that
+  // fails to decode (pruned, missing, corrupt) leaves the glass live
+  const decoded = await Promise.all(targets.map((t) => { const im = new Image(); im.src = t.texture; return im.decode().then(() => true, () => false) }))
   if (!current()) return 'live'
-  const applied = install(doc, targets)
-  if (applied === null) return 'live'
-  asleep.set(nodeKey, k)
+  if (decoded.some((ok) => !ok)) targets = []
+  if (!install(doc, targets)) return 'live'
+  asleep.set(nodeKey, { key: k, doc })
   return 'asleep'
 }
 
@@ -124,48 +122,36 @@ export function wake(nodeKey: string, iframe: HTMLIFrameElement | null): void {
   pending.delete(nodeKey)
   asleep.delete(nodeKey)
   const doc = iframe?.contentDocument
-  if (!doc) return
-  doc.getElementById(STYLE_ID)?.remove()
+  const st = doc?.getElementById(STYLE_ID)
+  if (!doc || !st) return
+  // the effects return under `transition: none`, computed NOW (a forced style recalc is a style
+  // change event); then the rule and the attributes go, with no property left to animate
+  st.textContent = `[data-mv-sleep]{transition:none!important}`
+  void doc.documentElement.offsetWidth
+  st.remove()
   doc.querySelectorAll('[data-mv-sleep]').forEach((el) => el.removeAttribute('data-mv-sleep'))
 }
 
-export function isAsleep(nodeKey: string): boolean { return asleep.has(nodeKey) }
-
-/** Warm the compiler for keys the human is likely to need next (the other theme, the device widths):
- *  answers are cached on the server's disk; nothing is applied here. */
-export function prefetch(keys: SleepKey[]): void { for (const key of keys) void ask(key).catch(() => {}) }
-
-/** Install the override for the targets that match this document exactly. Returns how many did, or
- *  null when the document should stay live (targets were expected and none matched). */
-function install(doc: Document, targets: Target[]): number | null {
+/** Install the override for the targets. All or nothing: a target whose element is not exactly the
+ *  one the server measured leaves the whole document live. Returns whether it was installed. */
+function install(doc: Document, targets: Target[]): boolean {
+  doc.querySelectorAll('[data-mv-sleep]').forEach((el) => el.removeAttribute('data-mv-sleep'))
   const rules: string[] = [PAUSE]
-  let matched = 0
+  const els: Element[] = []
   for (const [i, t] of targets.entries()) {
     let el: Element | null = null
     try { el = doc.querySelector(t.sel) } catch { /* a selector from another document shape */ }
-    if (!el) continue
+    if (!el) return false
     const r = el.getBoundingClientRect()
-    if (Math.abs(r.x - t.rect.x) > 0.02 || Math.abs(r.y - t.rect.y) > 0.02 || Math.abs(r.width - t.rect.w) > 0.02 || Math.abs(r.height - t.rect.h) > 0.02) continue
+    if (Math.abs(r.x - t.rect.x) > 0.02 || Math.abs(r.y - t.rect.y) > 0.02 || Math.abs(r.width - t.rect.w) > 0.02 || Math.abs(r.height - t.rect.h) > 0.02) return false
     const cs = doc.defaultView!.getComputedStyle(el)
-    if ((cs.backdropFilter || (cs as unknown as { webkitBackdropFilter?: string }).webkitBackdropFilter || 'none') !== t.filter) continue
-    el.setAttribute('data-mv-sleep', String(i))
-    const img = cs.backgroundImage === 'none' ? '' : cs.backgroundImage + ','
-    const color = cs.backgroundColor
-    // the spec's composition: the filtered backdrop (the texture), then the element's own colour, then
-    // its own images, then its content; the border box is the backdrop's clip
-    rules.push(`[data-mv-sleep="${i}"]{backdrop-filter:blur(0px)!important;-webkit-backdrop-filter:blur(0px)!important;` +
-      `background-color:transparent!important;` +
-      `background-image:${img}linear-gradient(${color},${color}),url("${t.texture}")!important;` +
-      `background-size:${img ? cs.backgroundSize + ',' : ''}auto,100% 100%!important;` +
-      `background-position:${img ? cs.backgroundPosition + ',' : ''}0 0,0 0!important;` +
-      `background-repeat:${img ? cs.backgroundRepeat + ',' : ''}no-repeat,no-repeat!important;` +
-      `background-origin:${img ? cs.backgroundOrigin + ',' : ''}border-box,border-box!important;` +
-      `background-clip:${img ? cs.backgroundClip + ',' : ''}border-box,border-box!important}`)
-    matched++
+    if ((cs.backdropFilter || (cs as unknown as { webkitBackdropFilter?: string }).webkitBackdropFilter || 'none') !== t.filter) return false
+    rules.push(sleepRule(`[data-mv-sleep="${i}"]`, readOwn(cs), t.texture))
+    els.push(el)
   }
-  if (targets.length && !matched) return null
+  els.forEach((el, i) => el.setAttribute('data-mv-sleep', String(i)))
   let st = doc.getElementById(STYLE_ID)
   if (!st) { st = doc.createElement('style'); st.id = STYLE_ID; (doc.head ?? doc.documentElement).appendChild(st) }
   st.textContent = rules.join('\n')
-  return matched
+  return true
 }
