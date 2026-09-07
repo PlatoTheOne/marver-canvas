@@ -122,10 +122,11 @@ export function iconModules(root: string): string[] {
       let st; try { st = statSync(p) } catch { continue }
       if (st.isDirectory()) walk(p)
       else if (/\.[jt]sx?$/.test(n)) {
-        const src = readFileSync(p, 'utf8')
+        // comments masked with spaces first, so a brace or a comma inside one cannot end the list
+        const src = readFileSync(p, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, (c) => ' '.repeat(c.length))
         for (const im of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) {
           const map = m.get(im[2]); if (!map) continue
-          for (const s of im[1].replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '').split(',')) { const name = s.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]; const hit = map.get(name); if (hit) found.add(hit.spec) }
+          for (const s of im[1].split(',')) { const name = s.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]; const hit = map.get(name); if (hit) found.add(hit.spec) }
         }
       }
     }
