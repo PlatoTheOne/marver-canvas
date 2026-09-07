@@ -247,9 +247,11 @@ export function marverPlugin(ctx: PluginCtx): Plugin {
       const bumpGen = (f: string) => {
         if (f.startsWith(localDir) || f.startsWith(boardsDirGen) || f === manifestPath || f.includes('/node_modules/')) return
         bakeGen++
-        // pruned against the generation current when the timer fires: an older timer must never delete a newer one
-        setTimeout(async () => { try { (await import('./bake.ts')).pruneBakes(root, bakeGen) } catch { /* best-effort */ } }, 500)
+        prune()
       }
+      // pruned against the generation current when the timer fires: an older timer must never delete a newer one
+      const prune = () => setTimeout(async () => { try { (await import('./bake.ts')).pruneBakes(root, bakeGen) } catch { /* best-effort */ } }, 500)
+      prune()   // a previous server's generation is dead on arrival
       server.watcher.on('add', bumpGen); server.watcher.on('unlink', bumpGen); server.watcher.on('change', bumpGen)
       server.watcher.on('add', (f) => { if (inScope(f)) { regen(); rescanTheme() } })
       server.watcher.on('unlink', (f) => { if (inScope(f)) { regen(); rescanTheme() } })
