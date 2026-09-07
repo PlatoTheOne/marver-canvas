@@ -77,9 +77,39 @@ The host does two things, and the deploy config names both. **`design/.dist` is
 gitignored - it is built ON THE HOST at deploy time, never committed.**
 
 - **build command**: `<install> && npx marver build` (respects `publish.json`,
-  seeds comment logs into the bundle)
+  seeds comment logs into the bundle, compiles the glass textures - see below)
 - **start command**: `npx marver serve` (reads `PORT` + the env vars above)
 - a **persistent volume** mounted at some path, named by `MARVER_DATA_DIR`
+- **Chrome or Chromium on the build machine**, for the glass textures. Without one
+  the build still succeeds and says `textures: none - no Chrome on this machine`;
+  the canvas ships and every feature works, but hi-fi frames with `backdrop-filter`
+  rest with their glass live and pan the way they did before 0.18.0.
+
+## Glass textures at build (0.18.0)
+
+A hi-fi frame at rest sleeps under certified textures of its blurred backdrops
+(the dev canvas compiles them on the fly). A published canvas has no compiler,
+so `marver build` compiles them once, against the exact site it just built -
+every published node, at its size on its board, in every theme - and ships them
+under `design/.dist/__mv/bakes/`. The build log tells you what happened:
+
+```
+textures: 8 frame views asleep under certified glass, 0 with live glass, 34 without effects (42 asked: every published node x 2 themes; 806 KB, 35 s)
+```
+
+- `asleep under certified glass` is the number you want to see for hi-fi boards.
+  `with live glass` counts views the compiler refused (glass inside glass, blend
+  modes, paint that is not a function of the URL): they show exactly as before.
+- Budget: about 1-3 s per hi-fi frame and theme, under a second per frame without
+  glass; a 4-frame hi-fi board plus a 128-frame lo-fi board took 35 s.
+- **Bundle your fonts** (`@fontsource-*`, or files under `public/`). The textures
+  are certified as the build machine renders the frame; a font that only exists on
+  the designer's laptop renders differently in the build container and the
+  visitor's browser then refuses those textures (the frame rests live, nothing
+  breaks).
+- Skip it on purpose with `npx marver build --no-textures`, or `MARVER_NO_TEXTURES=1`
+  in a CI that has no Chrome and should stay quiet about it.
+- `MARVER_CHROME=/path/to/chrome` names a browser marver does not find on its own.
 
 The `@marver-design/marver` dependency must resolve from the registry (a local
 `link:`/`file:` dep cannot ride to a remote host) - a normal registry version (`npm i -D @marver-design/marver@latest`) in
@@ -87,15 +117,36 @@ The `@marver-design/marver` dependency must resolve from the registry (a local
 
 ## Railway quickstart
 
-Commit a `railway.json` so `railway up` knows how to build and serve:
+Commit a `Dockerfile` at the upload root - Railway detects it, and it is the one
+path that gives the build a browser for the glass textures:
 
-```json
-{
-  "$schema": "https://railway.com/railway.schema.json",
-  "build": { "builder": "NIXPACKS", "buildCommand": "pnpm install && npx marver build" },
-  "deploy": { "startCommand": "npx marver serve" }
-}
+```dockerfile
+FROM node:22-slim
+# Chromium for `marver build` (the glass textures); fonts-liberation so system-ui text
+# has a face in the container. marver finds /usr/bin/chromium on its own and runs it
+# with the container flags a root build needs.
+RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-liberation \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+COPY . .
+RUN npx marver build
+ENV PORT=8080
+CMD ["npx", "marver", "serve"]
 ```
+
+```
+# .dockerignore
+node_modules
+design/.dist
+design/.local
+```
+
+(A `railway.json` with the NIXPACKS builder - `"buildCommand": "pnpm install && npx marver build"`,
+`"startCommand": "npx marver serve"` - works too, but a Nixpacks image has no browser: the build
+prints `textures: none` and ships the hi-fi frames with live glass. Add chromium to it, or use the
+Dockerfile.)
 
 Then, once per service:
 
@@ -117,7 +168,9 @@ railway logs                      # with a PASSWORD gate, the owner claim link p
 
 Republishing is just `railway up` again: the server unions the seeded logs on
 boot, so collected feedback is NEVER clobbered by a new build. Run ONE instance -
-the event log is single-writer by design.
+the event log is single-writer by design. A republish mints new glass textures;
+a tab that was already open keeps asking for the old ones and rests its glass
+live until it reloads - by design, so an old shell never dresses new frames.
 
 ## What the deployed gate offers (so you know what you're wiring)
 

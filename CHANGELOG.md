@@ -51,6 +51,9 @@ Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](ht
   on a rule that declared both, and Chromium then computed `backdrop-filter: none`: the sidebar
   and header of every published hi-fi frame lost their blur. The build now puts the standard
   declaration back beside the prefixed one.
+- **Chrome in a build container.** A root build on Linux (a Dockerfile, Railway) gets
+  `--no-sandbox` and `--disable-dev-shm-usage` from marver itself; `MARVER_CHROME` still names
+  a browser marver does not find. The publish guides carry a Dockerfile with Chromium.
 - **Published HTML frames never reported ready.** The build shipped the frame bridge without the
   module it imports, so in a published canvas an HTML frame stayed "still loading" and neither
   slept nor took laser or comments. Both files ship now.

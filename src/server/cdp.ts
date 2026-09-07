@@ -40,7 +40,12 @@ export const PROFILE_PREFIXES = ['mv-shot-', 'mv-browser-']
 // software by itself. Measured 2026-09-04; the PNGs differ only in edge antialiasing.
 // MV_CHROME_FLAGS adds flags; MV_CHROME_HEADED=1 opens a real window (a research switch: a display and
 // its vsync are the only way to measure what a person sees during a pan).
-const FLAGS = [...(process.env.MV_CHROME_HEADED ? [] : ['--headless=new']), '--hide-scrollbars', '--no-first-run', '--no-default-browser-check', '--disable-extensions', ...(process.env.MV_CHROME_FLAGS?.split(' ').filter(Boolean) ?? [])]
+/** What a Linux container needs and a desktop must not get: Chrome refuses to run as root with its
+ *  sandbox on (a build image runs as root), and a container's /dev/shm is too small for its tiles. */
+export function containerFlags(platform: string, uid: number | undefined): string[] {
+  return platform === 'linux' && uid === 0 ? ['--no-sandbox', '--disable-dev-shm-usage'] : []
+}
+const FLAGS = [...(process.env.MV_CHROME_HEADED ? [] : ['--headless=new']), '--hide-scrollbars', '--no-first-run', '--no-default-browser-check', '--disable-extensions', ...containerFlags(process.platform, process.getuid?.()), ...(process.env.MV_CHROME_FLAGS?.split(' ').filter(Boolean) ?? [])]
 const HANDSHAKE_MS = 15_000
 const MAX_MESSAGE = 1 << 30   // a screenshot answer is hundreds of MB of base64 at most; past this it is a runaway
 

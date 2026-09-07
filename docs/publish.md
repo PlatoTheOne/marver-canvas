@@ -44,7 +44,11 @@ certify (glass inside glass, blend modes, a frame whose paint is not a function 
 with its glass live, as before. The compile needs Chrome on the machine that builds: without one
 the build says so and ships without textures; `--no-textures` (or `MARVER_NO_TEXTURES=1` in CI)
 skips it on purpose. A visitor who resizes a frame to a device preset sees it live at that size
-(no texture was compiled for it).
+(no texture was compiled for it). The textures are certified as the build machine renders the
+frame, so bundle the fonts your frames use (`@fontsource-*`, or files under `public/`): a font
+that exists only on a designer's laptop renders differently in a build container, and the
+visitor's browser then refuses those textures and rests the frame live. A republish mints new
+textures; a tab already open keeps the old shell and rests its glass live until it reloads.
 
 ## Who can open your canvas
 
@@ -256,10 +260,13 @@ containerised canvas reports as one campaign.
 
 ## Railway (the one-pager)
 
-1. Push your repo to GitHub and create a Railway service from it.
-2. Build command: `npm ci && npx marver build`
-3. Start command: `npx marver serve`  (Railway's `$PORT` is picked up automatically)
-4. Variables: `MARVER_PASSWORD=<your password>`
+1. Push your repo to GitHub with the Dockerfile below at its root, and create a Railway
+   service from it (Railway detects the Dockerfile; a Nixpacks build has no browser and ships
+   the hi-fi frames with live glass).
+2. Start command: `npx marver serve`  (Railway's `$PORT` is picked up automatically)
+3. Variables: `MARVER_PASSWORD=<your password>`, or the identity gate from the table above.
+4. Read the build log: `textures: N frame views asleep under certified glass ...` is the line
+   that says the glass compiled; `textures: none - no Chrome` means the image has no browser.
 
 Deploy. The repo itself is the deployable - nothing to export, nothing to sync.
 
@@ -267,13 +274,18 @@ Deploy. The repo itself is the deployable - nothing to export, nothing to sync.
 
 ```dockerfile
 FROM node:22-slim
+RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-liberation \
+  && rm -rf /var/lib/apt/lists/*          # the browser `marver build` compiles the glass textures with
 WORKDIR /app                      # set share.name in design/config.ts - the fallback name is this directory
 COPY . .
-RUN npm ci && npx marver build
+RUN npm ci && npx marver build    # as root in a container: marver adds Chrome's --no-sandbox itself
 ENV PORT=8080
 EXPOSE 8080
 CMD ["npx", "marver", "serve"]
 ```
+
+Without a browser in the image the build still succeeds, says so, and ships every feature but the
+textures; `npx marver build --no-textures` skips the compile on purpose.
 
 ## Cloudflare Pages + Access (email/domain allowlists)
 
