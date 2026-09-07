@@ -47,7 +47,7 @@ export interface BakeTarget {
   bad: number
 }
 export type BakeResult =
-  | { ok: true; targets: BakeTarget[]; levels: number; rejected: number; ms: number; outside?: Outside }
+  | { ok: true; targets: BakeTarget[]; levels: number; rejected: number; ms: number; outside?: Outside; effects?: number }
   | { ok: false; error: string }
 
 const DSF = 2
@@ -86,6 +86,7 @@ const DETECT = `(() => {
     el.setAttribute('data-mv-glass', '')
     glass.push({ el, bf, r })
   }
+  window.__mvBakeDetected = glass.length
   // glass inside glass: the inner element reads its ancestor's UNFILTERED backdrop (measured in
   // Chrome 152), which no texture on either of them reproduces - both stay live
   const out = []
@@ -309,7 +310,8 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
     if (err) return { ok: false, error: `the frame rendered an error - ${err}` }
 
     const targets = (await ev(`(window.__mvBakeTargets = ${DETECT})`)) as { i: number; sel: string; rect: BakeTarget['rect']; filter: string; level: number }[]
-    if (!targets?.length) return { ok: true, targets: [], levels: 0, rejected: 0, ms: Date.now() - t0 }
+    const effects = Number(await ev('window.__mvBakeDetected')) || 0   // every backdrop-filter element, nested ones included
+    if (!targets?.length) return { ok: true, targets: [], levels: 0, rejected: 0, ms: Date.now() - t0, effects }
     if (targets.length > MAX_TARGETS) return { ok: false, error: `too many effects to compile (${targets.length})` }
     if (targets.some((t) => t.rect.w * t.rect.h > MAX_TARGET_AREA)) return { ok: false, error: 'an effect larger than the texture budget' }
     const levels = Math.max(...targets.map((t) => t.level)) + 1
@@ -388,7 +390,7 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
     if (moved) for (const t of done.values()) t.verified = false
 
     const out = [...done.values()]
-    return { ok: true, targets: out, levels, rejected: out.filter((t) => !t.verified).length, ms: Date.now() - t0, outside }
+    return { ok: true, targets: out, levels, rejected: out.filter((t) => !t.verified).length, ms: Date.now() - t0, outside, effects }
   } catch (err) {
     return { ok: false, error: (err as Error).message }
   } finally {

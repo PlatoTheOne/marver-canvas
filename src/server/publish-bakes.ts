@@ -40,16 +40,21 @@ export function publishedAsks(boards: Record<string, { nodes?: Node[] }>, themes
     if (!(w >= 120) || !(h >= 80) || w > ASK_MAX.side || h > ASK_MAX.side || w * h > ASK_MAX.area) return
     for (const theme of themes.length ? themes : ['light']) { const ask = { frame, theme, w, h }; seen.set(indexKey(ask), ask) }
   }
-  const size = (f: PublishedFrame, n?: Node) => {
-    if (n && typeof n.w === 'number' && typeof n.h === 'number' && n.w > 0 && n.h > 0) return { w: n.w, h: n.h }
+  // each dimension the node stores, else the frame's default (the shell's rule); a content-sized
+  // frame takes its height from a measurement the canvas makes, so without a stored height it
+  // rests live (never a texture for a height that is a guess)
+  const size = (f: PublishedFrame, n?: Node): { w: number; h: number } | null => {
+    const nw = n && typeof n.w === 'number' && n.w > 0 ? n.w : undefined, nh = n && typeof n.h === 'number' && n.h > 0 ? n.h : undefined
+    if (f.contentWidth && !f.viewport && !f.slide && !nh) return null
     const p = planShot(f, viewports, {})
-    return { w: p.width, h: p.initialHeight }
+    return { w: nw ?? p.width, h: nh ?? p.initialHeight }
   }
   for (const b of Object.values(boards)) for (const n of b?.nodes ?? []) {
     const f = typeof n?.frame === 'string' ? byId.get(n.frame) : undefined
-    if (f) { const { w, h } = size(f, n); add(f.id, w, h) }
+    const s = f && size(f, n)
+    if (s) add(f!.id, s.w, s.h)
   }
-  if (allScenes) for (const f of frames) { const { w, h } = size(f); add(f.id, w, h) }
+  if (allScenes) for (const f of frames) { const s = size(f); if (s) add(f.id, s.w, s.h) }
   return [...seen.values()]
 }
 
@@ -125,7 +130,8 @@ export async function bakePublished(opts: {
     // the totals come from the answers and the index, not from what happened to be logged
     for (const a of answers) {
       if (!a.ok) { stats.live++; log?.(`  bake: ${a.frame} ${a.theme} ${a.w}x${a.h} - stays live: ${a.error}`); continue }
-      if (!a.targets.length) { stats.plain++; continue }
+      if (!(a.effects ?? a.targets.length)) { stats.plain++; continue }   // no backdrop-filter at all
+      if (!a.targets.length) { stats.live++; log?.(`  bake: ${a.frame} ${a.theme} ${a.w}x${a.h} - ${a.effects} effects, all nested, stay live`); continue }
       const shipped = index.answers[indexKey(a)]?.targets.length ?? 0
       if (shipped) stats.asleep++; else stats.live++
       log?.(`  bake: ${a.frame} ${a.theme} ${a.w}x${a.h} - ${a.targets.length} effects, ${a.targets.length - shipped} stay live, ${a.ms} ms`)

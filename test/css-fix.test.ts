@@ -21,6 +21,16 @@ describe('keepBackdropFilter', () => {
     const css = '.q::after{content:"}";-webkit-backdrop-filter:blur(3px)}.r{content:"backdrop-filter:blur(9px)";-webkit-backdrop-filter:blur(5px)}.s{/* backdrop-filter: nope */-webkit-backdrop-filter:blur(7px)}'
     expect(keepBackdropFilter(css)).toBe('.q::after{content:"}";-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}.r{content:"backdrop-filter:blur(9px)";-webkit-backdrop-filter:blur(5px);backdrop-filter:blur(5px)}.s{/* backdrop-filter: nope */-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px)}')
   })
+  it('a custom property is not the property; the LAST prefixed declaration wins the cascade and is the one copied', () => {
+    expect(keepBackdropFilter('.a{--webkit-backdrop-filter:blur(9px);color:red}')).toBe('.a{--webkit-backdrop-filter:blur(9px);color:red}')
+    expect(keepBackdropFilter('.b{--webkit-backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(1px)}')).toBe('.b{--webkit-backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px)}')
+    expect(keepBackdropFilter('.c{-webkit-backdrop-filter:blur(1px);-webkit-backdrop-filter:blur(2px);color:red}')).toBe('.c{-webkit-backdrop-filter:blur(1px);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);color:red}')
+  })
+  it('declarations around a nested rule belong to the outer block; the nested rule is its own', () => {
+    expect(keepBackdropFilter('.a{color:red;.b{-webkit-backdrop-filter:blur(3px)}-webkit-backdrop-filter:blur(4px);}'))
+      .toBe('.a{color:red;.b{-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);}')
+    expect(keepBackdropFilter('.a{-webkit-backdrop-filter:blur(4px);.b{backdrop-filter:blur(3px)}}')).toBe('.a{-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);.b{backdrop-filter:blur(3px)}}')
+  })
   it('an at-rule condition is not a declaration: nested @media and @supports blocks are read innermost', () => {
     const css = '@media (min-width: 1px) {\n  @supports (backdrop-filter: blur(1px)) {\n    .a { -webkit-backdrop-filter: blur(2px); }\n  }\n}'
     expect(keepBackdropFilter(css)).toBe('@media (min-width: 1px) {\n  @supports (backdrop-filter: blur(1px)) {\n    .a { -webkit-backdrop-filter: blur(2px);backdrop-filter:blur(2px); }\n  }\n}')

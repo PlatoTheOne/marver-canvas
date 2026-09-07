@@ -534,7 +534,9 @@ export async function buildSite(root: string, boardsFlag?: string, allBoardsFlag
 
   // favicon pack + the shared bridge (plain module, ships verbatim)
   cpSync(join(clientDir, 'shell', 'favicon'), join(outDir, ROUTE.slice(1), 'favicon'), { recursive: true })
-  cpSync(join(clientDir, 'frame-host', 'bridge.js'), join(outDir, 'assets', 'bridge.js'))
+  // the bridge and the module it imports: without inspect.js beside it the bridge never ran in a
+  // published html frame (no ready, no sleep, no laser, no comments there)
+  for (const f of ['bridge.js', 'inspect.js']) cpSync(join(clientDir, 'frame-host', f), join(outDir, 'assets', f))
 
   // html frames: copied with the theme stylesheet + bridge statically injected
   const frameCss = cssFor('frame').map((f) => `<link rel="stylesheet" href="/${f}" />`).join('\n')
@@ -547,6 +549,8 @@ export async function buildSite(root: string, boardsFlag?: string, allBoardsFlag
     // would miss it and ship a lean without the shadow content).
     const shim = `<script>(function(){var a=Element.prototype.attachShadow;if(a)Element.prototype.attachShadow=function(i){if(i&&i.mode==='closed')window.__mvClosedShadow=1;return a.call(this,i)};})();</script>`
     html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + shim) : shim + html
+    // the textures' generation, as on the tsx frame document (the shell dresses this build only)
+    if (bakeGen) html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => `${m}<meta name="mv-bakes" content="${bakeGen}">`) : `<meta name="mv-bakes" content="${bakeGen}">` + html
     // with the strip on, html frames are served AT an opaque path - the source
     // path (which is the address the manifest hands out) never reaches dist
     const dest = strip ? opaquePath(f.id, '.html') : f.file

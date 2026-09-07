@@ -56,6 +56,8 @@ beforeAll(async () => {
   mkdirSync(scenes, { recursive: true })
   writeFileSync(join(scenes, 'glass.tsx'), GLASS)
   writeFileSync(join(scenes, 'plain.tsx'), PLAIN)
+  // an html frame with glass: published at an opaque path, stamped with the generation like the tsx host
+  writeFileSync(join(scenes, 'page.html'), `<!doctype html><html><head><meta name="viewport" content="width=400"><style>html,body{margin:0;height:300px;background:linear-gradient(135deg,#f80,#08f)}.g{position:absolute;left:40px;top:40px;width:200px;height:60px;border-radius:12px;background:rgba(255,255,255,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}</style></head><body><div class="g"></div></body></html>`)
   // the host stylesheet declares both forms, the way shadcn/Tailwind projects do: the published
   // stylesheet must keep the standard one (css-fix.ts) - this rule wins over the inline .g one
   writeFileSync(join(root, 'design', 'theme.css'), `.g.glass { backdrop-filter: blur(6px) saturate(1.3); -webkit-backdrop-filter: blur(6px) saturate(1.3); }\n`)
@@ -64,6 +66,7 @@ beforeAll(async () => {
   writeFileSync(join(boards, 'main.json'), JSON.stringify({ version: 1, name: 'main', order: 0, auto: false, nodes: [
     { key: 'g1', frame: 'app/glass', x: 0, y: 0, w: 800, h: 500 },
     { key: 'p1', frame: 'app/plain', x: 900, y: 0, w: 400, h: 300 },
+    { key: 'h1', frame: 'app/page', x: 0, y: 600, w: 400, h: 300 },
   ] }))
   writeFileSync(join(root, 'design', 'publish.json'), JSON.stringify({ version: 2, boards: { main: 'comment' } }))
   const out = execFileSync(process.execPath, [CLI, 'build', '--root', root], { stdio: 'pipe', encoding: 'utf8' })
@@ -97,8 +100,8 @@ const LIVE_FILTERS = `[...(${DOC}?.querySelectorAll('*') ?? [])].filter((e) => {
 async function open(q = ''): Promise<void> {
   await browser!.go(tab, `${ORIGIN}/${q}#/b/main`)
   const rested = q.includes('awake')
-    ? `[...document.querySelectorAll('iframe.sh-live')].length === 2 && [...document.querySelectorAll('iframe.sh-live')].every((f) => f.contentDocument?.querySelector('#root')?.children.length) && !document.querySelector('.sh-loading')`
-    : `[...document.querySelectorAll('iframe.sh-live')].length === 2 && [...document.querySelectorAll('iframe.sh-live')].every((f) => f.contentDocument?.getElementById('mv-sleep'))`
+    ? `[...document.querySelectorAll('iframe.sh-live')].length === 3 && [...document.querySelectorAll('iframe.sh-live')].every((f) => f.contentDocument?.body?.children.length) && !document.querySelector('.sh-loading')`
+    : `[...document.querySelectorAll('iframe.sh-live')].length === 3 && [...document.querySelectorAll('iframe.sh-live')].every((f) => f.contentDocument?.getElementById('mv-sleep'))`
   try {
     await until(rested, 45_000)
   } catch (e) {
@@ -126,20 +129,24 @@ async function diff(a: string, b: string): Promise<{ pixels: number; gt8: number
 describe('textures at publish time, in a real published browser', () => {
   skippable('the build compiles every published node in every theme and ships an index of what certified', async () => {
     const out = (globalThis as { __buildOut?: string }).__buildOut ?? ''
-    expect(out).toMatch(/textures: 2 frame views asleep under certified glass, 0 with live glass, 2 without effects \(4 asked/)
+    expect(out).toMatch(/textures: 4 frame views asleep under certified glass, 0 with live glass, 2 without effects \(6 asked/)
     const bakes = join(root, 'design', '.dist', '__mv', 'bakes')
     const gens = readdirSync(bakes)
     expect(gens).toHaveLength(1)
     const index = JSON.parse(readFileSync(join(bakes, gens[0], 'index.json'), 'utf8'))
     expect(String(index.gen)).toBe(gens[0])
-    expect(Object.keys(index.answers).sort()).toEqual(['app/glass|dark|800|500', 'app/glass|light|800|500'])
+    expect(Object.keys(index.answers).sort()).toEqual(['app/glass|dark|800|500', 'app/glass|light|800|500', 'app/page|dark|400|300', 'app/page|light|400|300'])
     const light = index.answers['app/glass|light|800|500'].targets
     expect(light).toHaveLength(3)   // the certified ones only: the blended one ships nothing, not even its selector
     expect(light.every((t: { verified: boolean }) => t.verified)).toBe(true)
     for (const t of light) expect(existsSync(join(root, 'design', '.dist', t.texture))).toBe(true)
     const shipped = readdirSync(join(bakes, gens[0]), { recursive: true }) as string[]
     expect(shipped.filter((f) => !f.endsWith('.png') && !f.endsWith('index.json') && f.includes('.')), 'only textures and the index ship').toEqual([])
-    expect(shipped.filter((f) => f.endsWith('.png'))).toHaveLength(6)
+    expect(shipped.filter((f) => f.endsWith('.png'))).toHaveLength(8)
+    // the html frame, copied to its opaque path, carries the generation too
+    const opaque = readdirSync(join(root, 'design', '.dist', '__mv', 'f')).filter((f) => f.endsWith('.html'))
+    expect(opaque).toHaveLength(1)
+    expect(readFileSync(join(root, 'design', '.dist', '__mv', 'f', opaque[0]), 'utf8')).toContain(`<meta name="mv-bakes" content="${gens[0]}">`)
     expect(existsSync(join(root, 'design', '.local', 'bakes', gens[0])), 'the build cleans its own cache generation').toBe(false)
     // the published stylesheet kept its glass: both declarations, in the extracted asset
     const css = readdirSync(join(root, 'design', '.dist', 'assets')).filter((f) => f.endsWith('.css')).map((f) => readFileSync(join(root, 'design', '.dist', 'assets', f), 'utf8')).join('\n')
@@ -154,6 +161,9 @@ describe('textures at publish time, in a real published browser', () => {
     expect(await ev(ASLEEP)).toBe(true)
     expect(await ev(TEXTURES)).toBe(3)
     expect(await ev(LIVE_FILTERS)).toBe(1)
+    // the html frame too: one texture, under a document that names the generation
+    expect(await ev(`document.querySelector('iframe.sh-live[title="app/page"]').contentDocument.querySelectorAll('[data-mv-sleep]').length`)).toBe(1)
+    expect(await ev(`document.querySelector('iframe.sh-live[title="app/page"]').contentDocument.querySelector('meta[name="mv-bakes"]')?.content`)).toBeTruthy()
     // the host stylesheet's glass rule applies in the published frame (its standard declaration survived the build)
     await open('?awake=1')
     expect(await ev(`getComputedStyle(${DOC}.querySelector('.glass')).backdropFilter`)).toBe('blur(6px) saturate(1.3)')

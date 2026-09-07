@@ -51,6 +51,9 @@ Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](ht
   on a rule that declared both, and Chromium then computed `backdrop-filter: none`: the sidebar
   and header of every published hi-fi frame lost their blur. The build now puts the standard
   declaration back beside the prefixed one.
+- **Published HTML frames never reported ready.** The build shipped the frame bridge without the
+  module it imports, so in a published canvas an HTML frame stayed "still loading" and neither
+  slept nor took laser or comments. Both files ship now.
 - `POST /__mv/api/bakes` (owner-gated) compiles frames in batch; textures are cached on disk
   under `design/.local/bakes/<generation>/` and served immutable. Identical asks share one
   compile; a compile the source outran is dropped; two dev servers on one project keep their

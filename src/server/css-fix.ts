@@ -11,23 +11,36 @@
  */
 import type { Plugin } from 'vite'
 
-/** Every innermost block that has the prefixed declaration and not the standard one gets it. Strings
+/** For every `-webkit-backdrop-filter` declaration (the property itself, never a custom property
+ *  that happens to end in it), the declaration list it belongs to - the enclosing block at that
+ *  nesting level, nested rules blanked - gets the standard declaration after its LAST prefixed one
+ *  (the cascade order the author had), unless it declares the standard property already. Strings
  *  and comments are masked first, so a brace or a declaration inside one is content, not syntax;
- *  the value is copied from the original text. */
+ *  values are copied from the original text. */
 export function keepBackdropFilter(css: string): string {
   const masked = css.replace(/\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, (m) => ' '.repeat(m.length))
-  const edits: { at: number; text: string }[] = []
-  for (const m of masked.matchAll(/\{[^{}]*\}/g)) {
-    const block = m[0], start = m.index!
-    if (/(^|[^-\w])backdrop-filter\s*:/i.test(block)) continue
-    const d = /-webkit-backdrop-filter\s*:\s*([^;}]+)/i.exec(block)
-    if (!d) continue
-    const valueStart = start + d.index + d[0].length - d[1].length, at = start + d.index + d[0].length
-    const value = css.slice(valueStart, at).trim()
-    if (value) edits.push({ at, text: `;backdrop-filter:${value}` })
+  const PREFIXED = /(^|[^-\w])-webkit-backdrop-filter\s*:\s*([^;{}]+)/gi
+  const edits = new Map<number, string>()
+  for (const m of masked.matchAll(PREFIXED)) {
+    const p = m.index! + m[1].length
+    // the enclosing block: back to the unmatched `{`, forward to its `}`
+    let depth = 0, open = -1
+    for (let i = p - 1; i >= 0; i--) { const c = masked[i]; if (c === '}') depth++; else if (c === '{') { if (depth === 0) { open = i; break } depth-- } }
+    if (open < 0 || edits.has(open)) continue
+    let close = masked.length; depth = 0
+    for (let i = open + 1; i < masked.length; i++) { const c = masked[i]; if (c === '{') depth++; else if (c === '}') { if (depth === 0) { close = i; break } depth-- } }
+    // its own declarations: the block with every nested rule blanked (same length)
+    let own = ''; depth = 0
+    for (let i = open + 1; i < close; i++) { const c = masked[i]; if (c === '{') depth++; own += depth ? ' ' : c; if (c === '}') depth-- }
+    if (/(^|[^-\w])backdrop-filter\s*:/i.test(own)) continue
+    let last: RegExpExecArray | undefined
+    for (const x of own.matchAll(PREFIXED)) last = x
+    if (!last) continue
+    const at = open + 1 + last.index! + last[0].length, value = css.slice(at - last[2].length, at).trim()
+    if (value) edits.set(open, `${at}:;backdrop-filter:${value}`)
   }
   let out = css
-  for (const e of edits.reverse()) out = out.slice(0, e.at) + e.text + out.slice(e.at)
+  for (const e of [...edits.values()].map((v) => ({ at: Number(v.slice(0, v.indexOf(':'))), text: v.slice(v.indexOf(':') + 1) })).sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.text + out.slice(e.at)
   return out
 }
 
