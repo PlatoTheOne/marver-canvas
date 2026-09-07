@@ -52,4 +52,9 @@ describe('keepBackdropFilter', () => {
     expect(keepBackdropFilter('.a{--x:[x;backdrop-filter:none];-webkit-backdrop-filter:blur(2px)}')).toBe('.a{--x:[x;backdrop-filter:none];-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}')
     expect(keepBackdropFilter('.a{--x:{a:b};.b{-webkit-backdrop-filter:blur(1px)}}')).toBe('.a{--x:{a:b};.b{-webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px)}}')
   })
+  it('a Unicode custom property name; braces inside parentheses are a value, not a rule', () => {
+    expect(keepBackdropFilter('.a{--é:{-webkit-backdrop-filter:blur(9px)}}')).toBe('.a{--é:{-webkit-backdrop-filter:blur(9px)}}')
+    expect(keepBackdropFilter('.a{--f:blur(2px);-webkit-backdrop-filter:var(--f,{})}')).toBe('.a{--f:blur(2px);-webkit-backdrop-filter:var(--f,{});backdrop-filter:var(--f,{})}')
+    expect(keepBackdropFilter('.a{-webkit-backdrop-filter:url(#a{b);color:red}')).toBe('.a{-webkit-backdrop-filter:url(#a{b);backdrop-filter:url(#a{b);color:red}')
+  })
 })

@@ -19,7 +19,7 @@ import type { Plugin } from 'vite'
  *  first, so a brace or a declaration inside one is content, not syntax; values come from the
  *  original text. */
 export function keepBackdropFilter(css: string): string {
-  const masked = maskCustomProperties(css.replace(/\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, (m) => ' '.repeat(m.length)))
+  const masked = maskCustomProperties(maskParens(css.replace(/\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, (m) => ' '.repeat(m.length))))
   const PREFIXED = /(^|[^-\w])-webkit-backdrop-filter\s*:/gi   // a candidate; the declaration split below decides
   const seen = new Set<number>()
   const edits: { at: number; text: string }[] = []
@@ -69,11 +69,25 @@ export function keepBackdropFilter(css: string): string {
   return out
 }
 
+/** What sits inside parentheses is a value - `var(--f,{})`, `url(#a{b)` - never a rule: blanked,
+ *  same length (values are copied from the original text). */
+function maskParens(masked: string): string {
+  const out = masked.split('')
+  let depth = 0
+  for (let i = 0; i < out.length; i++) {
+    const c = out[i]
+    if (c === ')' && depth) { depth--; continue }
+    if (depth) out[i] = ' '
+    if (c === '(') depth++
+  }
+  return out.join('')
+}
+
 /** A custom property's value may hold anything, braces, brackets and semicolons included (CSS
  *  Variables 1): blanked, same length, so no brace or property name inside one reads as syntax. */
 function maskCustomProperties(masked: string): string {
   const out = masked.split('')
-  const re = /(^|[;{\s])--[\w-]+\s*:/g
+  const re = /(^|[;{\s])--[^\s:;{}]+\s*:/g   // any name CSS allows, Unicode included
   for (const m of masked.matchAll(re)) {
     let depth = 0, i = m.index! + m[0].length
     for (; i < masked.length; i++) {
