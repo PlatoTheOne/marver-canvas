@@ -31,7 +31,8 @@ Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](ht
   three fixes: every frame evaluated the WHOLE prebundled icon package its scene imported one
   icon from (`@phosphor-icons/react`: 3000 icons, 6.5 MB of JavaScript, ~400 ms per frame,
   the entire boot of a lo-fi frame) - the dev server now unrolls icon barrel imports in design
-  sources to the per-icon modules the packages ship (phosphor, lucide), one line for one line;
+  sources to the per-icon modules the installed package's own barrel names (phosphor, lucide),
+  one line for one line;
   all frames booted at once on one main thread and finished together, so nothing showed until
   the last was done - frames are now admitted a few at a time, nearest the centre of the view
   first; and the 10 s ready watchdog fired on every frame of a big board and renavigated it, so

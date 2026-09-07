@@ -15,7 +15,12 @@
  * the next microtask, ranking again by the view of that moment.
  */
 export const SLOTS = 4
-let primed = false   // a frame of this batch has finished booting: the batch may use every slot
+/** A new batch's head start: one frame alone until it is done, or until this long - one stalled
+ *  first frame must not hold the whole board. */
+export const HEAD_MS = 2000
+let primed = false   // the batch may use every slot
+let gen = 0          // the batch: a pump scheduled for an earlier one is void
+let timer: ReturnType<typeof setTimeout> | undefined
 
 export interface Admission { key: string; rank: () => number; start: () => void }
 
@@ -26,7 +31,10 @@ let scheduled = false
 /** Ask for a slot. Starts once the view has settled (SETTLE ms) when one is free; else queued by rank. */
 export function admit(a: Admission): void {
   if (active.has(a.key)) return
-  if (!waiting.size && !active.size) primed = false   // a new batch
+  if (!waiting.size && !active.size) {   // a new batch
+    primed = false; gen++; scheduled = false; clearTimeout(timer)
+    timer = setTimeout(() => { primed = true; schedule(0) }, HEAD_MS)
+  }
   waiting.set(a.key, a)
   schedule(SETTLE)
 }
@@ -42,7 +50,8 @@ export function release(key: string): void {
 function schedule(ms: number): void {
   if (scheduled) return
   scheduled = true
-  if (ms) setTimeout(pump, ms); else queueMicrotask(pump)
+  const g = gen, run = () => { if (g === gen) pump() }
+  if (ms) setTimeout(run, ms); else queueMicrotask(run)
 }
 
 function pump(): void {
@@ -58,4 +67,4 @@ function pump(): void {
 }
 
 /** For tests: nothing queued, nothing active. */
-export function resetAdmission(): void { waiting.clear(); active.clear(); primed = false }
+export function resetAdmission(): void { waiting.clear(); active.clear(); primed = false; scheduled = false; gen++; clearTimeout(timer) }

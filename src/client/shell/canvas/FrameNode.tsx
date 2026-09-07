@@ -58,24 +58,34 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
   const { select, setInteract, moveNode, moveSelectedBy, resizeNode, setStatus, reloadFrame, setGesture, toast } = useStore.getState()
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const themeRef = useRef(node.theme)
-  // src is frozen at mount: theme changes ride sh:set-theme (never navigation), so
-  // frame state (forms, scroll, dialogs) survives a theme flip. Real file changes below.
-  const initialSrc = useRef<string | null>(null)
-  if (frame && initialSrc.current === null) initialSrc.current = frameUrl(frame, node.theme)
+  // src is set once, at ADMISSION, with the theme and revision of that moment: theme changes ride
+  // sh:set-theme (never navigation), so frame state (forms, scroll, dialogs) survives a theme flip.
+  // Real file changes and reloads navigate below - only once admitted; a queued frame takes the
+  // fresh revision when its turn comes.
+  const srcRef = useRef<string | null>(null)
   const fileRef = useRef(frame ? `${frame.kind}:${frame.file}` : null)
 
-  // admission (admission.ts): the iframe gets its src when a boot slot is free, nearest the viewport
-  // centre first; the slot goes back when the frame is ready, errored, gone, or its watchdog acts
+  // admission (admission.ts): the iframe gets its src when a boot slot is free, nearest the centre
+  // of the view first; the slot goes back when the frame is ready, errored, gone, or its watchdog acts
   const [admitted, setAdmitted] = useState(false)
+  const admittedRef = useRef(false)
+  const navigate = (url: string) => { if (!admittedRef.current || !iframeRef.current) return; srcRef.current = url; iframeRef.current.src = url }
   useEffect(() => {
-    if (!frame || node.missing) return
+    if (!frame || node.missing || admittedRef.current) return   // a document that exists (restored, say) needs no slot
     const rank = () => {   // visible first, then by distance to the centre of the canvas (the panel offsets the window's)
       const r = iframeRef.current?.getBoundingClientRect(), c = document.querySelector('.sh-canvas')?.getBoundingClientRect()
       if (!r || !c) return Infinity
       const visible = r.right > c.left && r.left < c.right && r.bottom > c.top && r.top < c.bottom
       return (visible ? 0 : 1e7) + Math.hypot(r.x + r.width / 2 - c.x - c.width / 2, r.y + r.height / 2 - c.y - c.height / 2)
     }
-    admit({ key: node.key, rank, start: () => setAdmitted(true) })
+    const start = () => {
+      const s = useStore.getState(), n = s.nodes.find((x) => x.key === node.key), f = n && s.frameFor(n)
+      if (!n || !f) { release(node.key); return }
+      srcRef.current = frameUrl(f, n.theme)
+      admittedRef.current = true
+      setAdmitted(true)
+    }
+    admit({ key: node.key, rank, start })
     return () => release(node.key)
   }, [frame?.id, node.key, node.missing])
   useEffect(() => { if (node.status !== 'loading') release(node.key) }, [node.status, node.key])
@@ -175,7 +185,7 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
     const sig = `${frame.kind}:${frame.file}`
     if (fileRef.current !== null && fileRef.current !== sig && iframeRef.current) {
       setStatus(node.key, 'loading')
-      iframeRef.current.src = frameUrl(frame, node.theme)
+      navigate(frameUrl(frame, node.theme))
     }
     fileRef.current = sig
   }, [frame?.kind, frame?.file])
@@ -186,7 +196,7 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
   useEffect(() => {
     if ((node.nav ?? 0) === navRef.current) return
     navRef.current = node.nav ?? 0
-    if (frame && iframeRef.current) iframeRef.current.src = frameUrl(frame, node.theme)
+    if (frame) navigate(frameUrl(frame, node.theme))
   }, [node.nav])
 
   // Reload the frame, assigning the fresh URL SYNCHRONOUSLY so the live iframe's src is current the
@@ -199,8 +209,8 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
     reloadFrame(node.key, automatic)
     const after = useStore.getState().nodes.find((x) => x.key === node.key)
     const f = useStore.getState().frameFor(node)
-    if (after && f && iframeRef.current) {
-      iframeRef.current.src = frameUrl(f, node.theme)
+    if (after && f) {
+      navigate(frameUrl(f, node.theme))
       navRef.current = after.nav ?? 0
     }
   }
@@ -386,7 +396,7 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
         <iframe
           ref={bindIframe}
           className="sh-live"
-          src={admitted ? (initialSrc.current ?? frameUrl(frame, node.theme)) : undefined}
+          src={admitted ? srcRef.current ?? undefined : undefined}
           title={frame.id}
           onLoad={registerWin}
           style={{ width: node.w, height: node.h, display: node.missing || node.status === 'error' ? 'none' : 'block' }}
