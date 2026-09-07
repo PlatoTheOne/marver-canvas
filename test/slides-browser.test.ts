@@ -171,13 +171,14 @@ describe('slides in a real published browser', () => {
     const audit = await browser!.eval(tab, `
       [...document.querySelectorAll('iframe.sh-live')].map((f) => {
         const d = f.contentDocument
-        return { svgs: d.querySelectorAll('svg').length, slept: !!d.getElementById('mv-sleep'), textures: d.querySelectorAll('[data-mv-sleep]').length }
+        return { svgs: d.querySelectorAll('svg').length, slept: !!d.getElementById('mv-sleep'), textures: d.querySelectorAll('[data-mv-sleep]').length, video: d.body.textContent.includes('Motion') }
       })
     `)
     for (const a of audit) expect(a.slept).toBe(true)
-    // a published canvas has no compiler: every slide's sleep is the animation pause alone (the
-    // video's glass play button stays live)
-    for (const a of audit) expect(a.textures).toBe(0)
+    // the build compiled the published slides' glass (publish-bakes.ts): the video's glass play
+    // button rests under its certified texture, the two slides without glass under the pause alone
+    for (const a of audit) expect(a.textures, JSON.stringify(a)).toBe(a.video ? 1 : 0)   // 'Motion' is the video slide
+    expect(audit.filter((a: { video: boolean }) => a.video)).toHaveLength(1)
     // the chart really rendered (as SVG) rather than silently not mounting
     expect(audit.some((a: { svgs: number }) => a.svgs > 0)).toBe(true)
     // the board JSON stores 640×360 on these nodes: the canvas honors it like

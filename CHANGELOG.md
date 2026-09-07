@@ -41,6 +41,16 @@ Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](ht
 
 ### Added
 
+- **Published canvases rest under the same certified glass.** `marver build` compiles every
+  published node's textures, in every theme, against the site it just built, and ships them with
+  it (`__mv/bakes/`); the static shell reads one index. A shared hi-fi board now pans and zooms
+  like the dev canvas (measured: 36-59 flat blocks per presented frame at worst, from 1139-1417).
+  Needs Chrome on the build machine; without one the build ships without textures and says so.
+  `--no-textures` / `MARVER_NO_TEXTURES=1` skip the compile.
+- **Published glass was flat.** The CSS transform of a build kept only `-webkit-backdrop-filter`
+  on a rule that declared both, and Chromium then computed `backdrop-filter: none`: the sidebar
+  and header of every published hi-fi frame lost their blur. The build now puts the standard
+  declaration back beside the prefixed one.
 - `POST /__mv/api/bakes` (owner-gated) compiles frames in batch; textures are cached on disk
   under `design/.local/bakes/<generation>/` and served immutable. Identical asks share one
   compile; a compile the source outran is dropped; two dev servers on one project keep their

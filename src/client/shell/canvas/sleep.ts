@@ -26,6 +26,7 @@
  * it), then removes the <style> and the attributes.
  */
 import { ROUTE } from '../../const.ts'
+import { BAKES, PUBLISHED } from '../store.ts'
 import { readOwn, sleepRule } from '../../../shared/sleep-rule.ts'
 
 export interface SleepKey { frame: string; theme: string; w: number; h: number }
@@ -63,6 +64,12 @@ export function hasEffects(doc: Document): boolean {
   return false
 }
 
+/** A published canvas has no compiler: its textures were compiled at build time against the very
+ *  document it serves, and ship as one static index (publish-bakes.ts), read once. */
+let published: Promise<Record<string, Answer>> | undefined
+const staticAnswers = () => (published ??= (BAKES ? fetch(`${ROUTE}/bakes/${BAKES}/index.json`).then((r) => (r.ok ? r.json() : {})) : Promise.resolve({}))
+  .then((j: { gen?: number; answers?: Record<string, Answer> }) => (j.gen === BAKES && j.answers) || {}).catch((): Record<string, Answer> => ({})))
+
 // ---- one batch per tick: every frame that decides to sleep in the same moment shares a browser
 const queue: { key: SleepKey; resolve: (a: Answer) => void }[] = []
 let flush: ReturnType<typeof setTimeout> | undefined
@@ -77,12 +84,15 @@ function ask(key: SleepKey): Promise<Answer> {
       for (const q of batch) { const kk = keyOf(q.key); const e = byKey.get(kk); if (e) e.waiters.push(q.resolve); else byKey.set(kk, { key: q.key, waiters: [q.resolve] }) }
       const asks = [...byKey.values()].map((e) => ({ frame: e.key.frame, theme: e.key.theme, w: Math.round(e.key.w), h: Math.round(e.key.h) }))
       let data: { answers?: (Answer & SleepKey)[] } | null = null
-      try {
-        const r = await fetch(`${ROUTE}/api/bakes`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-mv-c': csrf() }, body: JSON.stringify({ asks }) })
-        data = r.ok ? await r.json() : null
-      } catch { data = null }
+      const index = PUBLISHED ? await staticAnswers() : null
+      if (!index) {
+        try {
+          const r = await fetch(`${ROUTE}/api/bakes`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-mv-c': csrf() }, body: JSON.stringify({ asks }) })
+          data = r.ok ? await r.json() : null
+        } catch { data = null }
+      }
       for (const e of byKey.values()) {
-        const a = data?.answers?.find((x) => keyOf(x) === keyOf(e.key))
+        const a = index ? index[keyOf(e.key)] : data?.answers?.find((x) => keyOf(x) === keyOf(e.key))
         const answer: Answer = a ? (a.ok ? { ok: true, targets: a.targets } : { ok: false, error: a.error }) : { ok: false, error: 'no answer' }
         for (const w of e.waiters) w(answer)
       }
@@ -126,7 +136,7 @@ export async function sleep(nodeKey: string, iframe: HTMLIFrameElement, key: Sle
   // a certified sleep is remembered; the pause-only fallback is not, so the next lifecycle event
   // asks again (a compile the source outran, a server hiccup), and one retry is scheduled now
   if (targets.length) asleep.set(nodeKey, { key: k, doc })
-  else if (!retried.has(nodeKey)) { retried.add(nodeKey); setTimeout(() => { retried.delete(nodeKey); if (current()) void sleep(nodeKey, iframe, key) }, RETRY_MS) }
+  else if (!PUBLISHED && !retried.has(nodeKey)) { retried.add(nodeKey); setTimeout(() => { retried.delete(nodeKey); if (current()) void sleep(nodeKey, iframe, key) }, RETRY_MS) }   // a static miss is final
   return 'asleep'
 }
 

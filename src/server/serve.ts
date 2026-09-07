@@ -13,7 +13,7 @@ import { NAME } from '../cli/name.ts'
 import { poweredByUrl } from '../shared/utm.ts'
 import { secureSuffix } from './secure-cookie.ts'
 
-const MIME: Record<string, string> = {
+export const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',

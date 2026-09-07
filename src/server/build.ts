@@ -23,6 +23,7 @@ import { loadConfig } from './config.ts'
 import { detectHost } from './detect.ts'
 import { scanFrames, type FrameEntry, type Manifest } from './manifest.ts'
 import { marverPlugin, tailwind3Css, tailwind4Plugin } from './plugin.ts'
+import { cssFixPlugin } from './css-fix.ts'
 import { buildTree, flatten, isBoardName, type FolderRow, type TreeItem } from '../shared/board-tree.ts'
 import { boardFields, checkBoardsDir, listBoardFiles, readRegistry } from './boards.ts'
 
@@ -335,7 +336,7 @@ export function layoutChain(fileKey) {
 `
 }
 
-export async function buildSite(root: string, boardsFlag?: string, allBoardsFlag?: boolean, embedSeeds?: boolean) {
+export async function buildSite(root: string, boardsFlag?: string, allBoardsFlag?: boolean, embedSeeds?: boolean, textures = true) {
   const config = await loadConfig(root)
   const host = detectHost(root)
   const pkgDir = packageDir()
@@ -414,7 +415,10 @@ export async function buildSite(root: string, boardsFlag?: string, allBoardsFlag
   // default is where `/` opens - the first published board, never a synthesized aggregate
   // titles: what the published switcher labels boards by (folder titles ride on the tree)
   const titles = Object.fromEntries(publishedNames.flatMap((n) => { const t = boardFields(allBoards[n], isBoardName).title; return t ? [[n, t]] : [] }))
+  // the textures' generation is minted BEFORE the bundle so the shell can name the index this build shipped
+  const bakeGen = textures ? Date.now() : undefined
   const data = {
+    bakes: bakeGen,
     manifest: pubManifest, boards, names: publishedNames, tree, ...(Object.keys(titles).length ? { titles } : {}),
     default: publishedNames.find((n) => n !== 'all-scenes') ?? publishedNames[0],
     rights, policy: { boards: boardsMeta, reveal: policy.reveal, ...(lockedShell ? { lockedShell: true } : {}) },
@@ -453,7 +457,7 @@ export async function buildSite(root: string, boardsFlag?: string, allBoardsFlag
   }
   let css: Record<string, unknown> | undefined
   if (host.tailwind === 3) css = (await tailwind3Css(root)) ?? undefined
-  plugins.push(marverPlugin({ root, clientDir, config, detectedThemeCss: host.themeCss }))
+  plugins.push(marverPlugin({ root, clientDir, config, detectedThemeCss: host.themeCss }), cssFixPlugin())
 
   // Production mode, EXPLICITLY - never inherited from the shell. A build run
   // with NODE_ENV=development/test makes plugin-react emit jsxDEV calls whose
@@ -644,8 +648,25 @@ export async function buildSite(root: string, boardsFlag?: string, allBoardsFlag
     ...(config.share.notify === false ? { notify: false } : {}),
   }))
 
+  // textures for the published hi-fi frames (publish-bakes.ts): compiled against THIS site, shipped with it
+  let textureLine = '  textures: skipped (--no-textures)'
+  if (textures && bakeGen) {
+    const { bakePublished } = await import('./publish-bakes.ts')
+    const pubFrameFile = new Map(pubFrames.map((f) => [f.id, f]))
+    const r = await bakePublished({
+      root, outDir, gen: bakeGen, boards, themes: config.themes, log: (l) => console.log(l),
+      // the frame's PUBLISHED url (an html frame's opaque path when the source is stripped)
+      urlFor: (id, theme) => { const f = pubFrameFile.get(id); if (!f) return null; return f.kind === 'html' ? `/${f.file}?theme=${encodeURIComponent(theme)}&r=${bakeGen}` : `/__mv/frame/?id=${encodeURIComponent(id)}&theme=${encodeURIComponent(theme)}&r=${bakeGen}` },
+    })
+    textureLine = r === null
+      ? `  textures: none - no Chrome on this machine; frames with glass will rest live (install Chrome, or ship as is)`
+      : r.asked === 0 ? '  textures: nothing to compile'
+      : `  textures: ${r.asleep} frame view${r.asleep === 1 ? '' : 's'} asleep under certified glass, ${r.live} with live glass, ${r.plain} without effects (${r.asked} asked: every published node x ${config.themes.length || 1} theme${config.themes.length === 1 ? '' : 's'}; ${(r.bytes / 1024).toFixed(0)} KB, ${(r.ms / 1000).toFixed(1)} s)`
+  }
+
   console.log(`\n  ${NAME} build → design/.dist`)
   console.log(`  boards: ${publishedNames.map((n) => `${n} (${rights[n]})`).join(', ')}`)
+  console.log(textureLine)
   console.log(`  frames: ${frames.length}${includeAll ? '' : ` of ${manifest.frames.length} (build-time filter)`}`)
   if (copiedAssets) console.log(`  assets: ${copiedAssets} referenced file${copiedAssets === 1 ? '' : 's'} from design/assets/ (unreferenced assets never ship)`)
   if (!includeAll && existsSync(join(root, 'public')))

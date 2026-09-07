@@ -36,9 +36,15 @@ only around published boards (a folder with nothing published never reaches the 
 and `title`s and `description`s ship only for published things - the project's, the
 published boards', their folders', scenes' and frames'.
 
-A published canvas has no compiler (its image ships no Chrome): frames rest with their animations
-paused and their glass live, exactly as before 0.18.0. The certified textures that make a hi-fi
-board pan like statics are a dev-canvas feature.
+**Glass at rest.** `marver build` compiles the textures a hi-fi frame rests under (the same
+certified compile as the dev canvas, spec 16) against the site it just built - every published
+node, at its size on its board, in every theme - and ships them with it under `__mv/bakes/`. A
+visitor's browser reads one static index; the shell is the same. Whatever the compiler cannot
+certify (glass inside glass, blend modes, a frame whose paint is not a function of its URL) rests
+with its glass live, as before. The compile needs Chrome on the machine that builds: without one
+the build says so and ships without textures; `--no-textures` (or `MARVER_NO_TEXTURES=1` in CI)
+skips it on purpose. A visitor who resizes a frame to a device preset sees it live at that size
+(no texture was compiled for it).
 
 ## Who can open your canvas
 

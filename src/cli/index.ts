@@ -74,6 +74,7 @@ cli
   .option('--boards <names>', 'Publish only these boards (comma-separated); overrides the publish policy')
   .option('--all-boards', 'Publish every board - the loud override for the default-closed policy')
   .option('--embed-seeds', 'Copy comment history INTO the web root (identifying - every event carries its author\'s email)')
+  .option('--no-textures', 'Skip compiling the glass textures the published frames rest under (needs Chrome; a CI without one skips on its own)')
   .option('--root <dir>', 'Host repo root', { default: '.' })
   .action(async (opts) => {
     const { buildSite } = await import('../server/build.ts')
@@ -81,7 +82,7 @@ cli
       // cac yields `true` for a valueless/empty --boards; any presence of the flag
       // must reach buildSite so an empty filter fails CLOSED, never publishes all
       const boards = opts.boards === undefined ? undefined : typeof opts.boards === 'string' ? opts.boards : ''
-      await buildSite(resolve(opts.root), boards, opts.allBoards === true, opts.embedSeeds === true)
+      await buildSite(resolve(opts.root), boards, opts.allBoards === true, opts.embedSeeds === true, opts.textures !== false && !process.env.MARVER_NO_TEXTURES)
     } catch (err) {
       console.error(`[${NAME}] build failed: ${(err as Error).message}`)
       process.exit(1)

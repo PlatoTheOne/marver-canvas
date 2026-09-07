@@ -19,7 +19,7 @@ const s = await b.tab()
 await b.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 2, mobile: false }, s)
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
 await b.go(s, `${origin}/?${q}#/b/${board}`)
-await b.until(s, `(() => { const st = window.__mvStore?.getState(); return !!st && st.nodes.length > 0 && st.nodes.every((n) => n.status === 'ready') })()`, 90_000)
+await b.until(s, `(() => { const st = window.__mvStore?.getState(); if (st) return st.nodes.length > 0 && st.nodes.every((n) => n.status === 'ready'); const fr = [...document.querySelectorAll('iframe.sh-live')]; return fr.length > 0 && fr.every((f) => f.contentDocument?.getElementById('mv-sleep')) })()`, 90_000)   // a published shell has no store hook: every frame asleep is every frame ready
 await wait(5000)
 if (css.startsWith('js:')) console.log('js:', await b.eval(s, css.slice(3)))
 else if (css) await b.eval(s, `(() => { const st = document.createElement('style'); st.textContent = ${JSON.stringify(css)}; document.head.appendChild(st); return 1 })()`)
