@@ -45,8 +45,8 @@ export function publishedAsks(boards: Record<string, { nodes?: Node[] }>, themes
   // rests live (never a texture for a height that is a guess)
   const size = (f: PublishedFrame, n?: Node): { w: number; h: number } | null => {
     const nw = n && typeof n.w === 'number' && n.w > 0 ? n.w : undefined, nh = n && typeof n.h === 'number' && n.h > 0 ? n.h : undefined
-    if (f.contentWidth && !f.viewport && !f.slide && !nh) return null
     const p = planShot(f, viewports, {})
+    if (p.fullHeight && !nh) return null   // the canvas measures this frame's height
     return { w: nw ?? p.width, h: nh ?? p.initialHeight }
   }
   for (const b of Object.values(boards)) for (const n of b?.nodes ?? []) {

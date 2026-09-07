@@ -21,10 +21,17 @@ describe('keepBackdropFilter', () => {
     const css = '.q::after{content:"}";-webkit-backdrop-filter:blur(3px)}.r{content:"backdrop-filter:blur(9px)";-webkit-backdrop-filter:blur(5px)}.s{/* backdrop-filter: nope */-webkit-backdrop-filter:blur(7px)}'
     expect(keepBackdropFilter(css)).toBe('.q::after{content:"}";-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}.r{content:"backdrop-filter:blur(9px)";-webkit-backdrop-filter:blur(5px);backdrop-filter:blur(5px)}.s{/* backdrop-filter: nope */-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px)}')
   })
-  it('a custom property is not the property; the LAST prefixed declaration wins the cascade and is the one copied', () => {
+  it('a custom property is not the property; every prefixed declaration is mirrored in order, so an earlier !important still wins', () => {
     expect(keepBackdropFilter('.a{--webkit-backdrop-filter:blur(9px);color:red}')).toBe('.a{--webkit-backdrop-filter:blur(9px);color:red}')
     expect(keepBackdropFilter('.b{--webkit-backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(1px)}')).toBe('.b{--webkit-backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px)}')
-    expect(keepBackdropFilter('.c{-webkit-backdrop-filter:blur(1px);-webkit-backdrop-filter:blur(2px);color:red}')).toBe('.c{-webkit-backdrop-filter:blur(1px);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);color:red}')
+    expect(keepBackdropFilter('.c{-webkit-backdrop-filter:blur(1px)!important;-webkit-backdrop-filter:blur(2px);color:red}'))
+      .toBe('.c{-webkit-backdrop-filter:blur(1px)!important;backdrop-filter:blur(1px)!important;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);color:red}')
+  })
+  it('a nested rule and its prelude are not the block\'s declarations, whatever the prelude says', () => {
+    expect(keepBackdropFilter('.a{-webkit-backdrop-filter:blur(1px);@supports (backdrop-filter:blur(2px)){color:red}}'))
+      .toBe('.a{-webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px);@supports (backdrop-filter:blur(2px)){color:red}}')
+    expect(keepBackdropFilter('.a{color:red;@supports (-webkit-backdrop-filter:blur(2px)){color:blue}}'))
+      .toBe('.a{color:red;@supports (-webkit-backdrop-filter:blur(2px)){color:blue}}')
   })
   it('declarations around a nested rule belong to the outer block; the nested rule is its own', () => {
     expect(keepBackdropFilter('.a{color:red;.b{-webkit-backdrop-filter:blur(3px)}-webkit-backdrop-filter:blur(4px);}'))
