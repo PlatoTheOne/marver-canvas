@@ -57,4 +57,8 @@ describe('keepBackdropFilter', () => {
     expect(keepBackdropFilter('.a{--f:blur(2px);-webkit-backdrop-filter:var(--f,{})}')).toBe('.a{--f:blur(2px);-webkit-backdrop-filter:var(--f,{});backdrop-filter:var(--f,{})}')
     expect(keepBackdropFilter('.a{-webkit-backdrop-filter:url(#a{b);color:red}')).toBe('.a{-webkit-backdrop-filter:url(#a{b);backdrop-filter:url(#a{b);color:red}')
   })
+  it('a backslash-escaped parenthesis in a selector (Tailwind content utilities) is not syntax', () => {
+    expect(keepBackdropFilter('.before\\:content-\\[\\\'\\(\\\'\\]::before{content:"("}.b{-webkit-backdrop-filter:blur(1px)}'))
+      .toBe('.before\\:content-\\[\\\'\\(\\\'\\]::before{content:"("}.b{-webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px)}')
+  })
 })

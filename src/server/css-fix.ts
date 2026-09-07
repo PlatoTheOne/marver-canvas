@@ -19,7 +19,8 @@ import type { Plugin } from 'vite'
  *  first, so a brace or a declaration inside one is content, not syntax; values come from the
  *  original text. */
 export function keepBackdropFilter(css: string): string {
-  const masked = maskCustomProperties(maskParens(css.replace(/\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, (m) => ' '.repeat(m.length))))
+  // strings, comments and backslash escapes (Tailwind's `content-['(']` puts a `\(` in a selector) are content
+  const masked = maskCustomProperties(maskParens(css.replace(/\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\\[\s\S]/g, (m) => ' '.repeat(m.length))))
   const PREFIXED = /(^|[^-\w])-webkit-backdrop-filter\s*:/gi   // a candidate; the declaration split below decides
   const seen = new Set<number>()
   const edits: { at: number; text: string }[] = []
