@@ -58,20 +58,22 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
   const { select, setInteract, moveNode, moveSelectedBy, resizeNode, setStatus, reloadFrame, setGesture, toast } = useStore.getState()
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const themeRef = useRef(node.theme)
-  // src is set once, at ADMISSION, with the theme and revision of that moment: theme changes ride
-  // sh:set-theme (never navigation), so frame state (forms, scroll, dialogs) survives a theme flip.
-  // Real file changes and reloads navigate below - only once admitted; a queued frame takes the
-  // fresh revision when its turn comes.
-  const srcRef = useRef<string | null>(null)
+  // The JSX src is set ONCE, at ADMISSION, with the theme and revision of that moment, and never
+  // changes again (React would write it back after any later navigation and load the frame twice):
+  // theme changes ride sh:set-theme (never navigation), so frame state (forms, scroll, dialogs)
+  // survives a theme flip; file changes and reloads navigate imperatively below, only once
+  // admitted - a queued frame takes the fresh revision when its turn comes.
+  const [src, setSrc] = useState<string>()
+  const admitted = src !== undefined
+  const admittedRef = useRef(false)
   const fileRef = useRef(frame ? `${frame.kind}:${frame.file}` : null)
 
   // admission (admission.ts): the iframe gets its src when a boot slot is free, nearest the centre
   // of the view first; the slot goes back when the frame is ready, errored, gone, or its watchdog acts
-  const [admitted, setAdmitted] = useState(false)
-  const admittedRef = useRef(false)
-  const navigate = (url: string) => { if (!admittedRef.current || !iframeRef.current) return; srcRef.current = url; iframeRef.current.src = url }
+  const navigate = (url: string) => { if (admittedRef.current && iframeRef.current) iframeRef.current.src = url }
   useEffect(() => {
-    if (!frame || node.missing || admittedRef.current) return   // a document that exists (restored, say) needs no slot
+    if (!frame || node.missing) { admittedRef.current = false; setSrc(undefined); return }   // gone: the card replaces the iframe; a return is a new document, admitted anew
+    if (admittedRef.current) return   // the document exists (the frame's id changed under it): no slot
     const rank = () => {   // visible first, then by distance to the centre of the canvas (the panel offsets the window's)
       const r = iframeRef.current?.getBoundingClientRect(), c = document.querySelector('.sh-canvas')?.getBoundingClientRect()
       if (!r || !c) return Infinity
@@ -81,9 +83,9 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
     const start = () => {
       const s = useStore.getState(), n = s.nodes.find((x) => x.key === node.key), f = n && s.frameFor(n)
       if (!n || !f) { release(node.key); return }
-      srcRef.current = frameUrl(f, n.theme)
+      if (n.status !== 'loading') setStatus(node.key, 'loading')   // a returning frame boots under the watchdog like any other
       admittedRef.current = true
-      setAdmitted(true)
+      setSrc(frameUrl(f, n.theme))
     }
     admit({ key: node.key, rank, start })
     return () => release(node.key)
@@ -396,7 +398,7 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
         <iframe
           ref={bindIframe}
           className="sh-live"
-          src={admitted ? srcRef.current ?? undefined : undefined}
+          src={src}
           title={frame.id}
           onLoad={registerWin}
           style={{ width: node.w, height: node.h, display: node.missing || node.status === 'error' ? 'none' : 'block' }}

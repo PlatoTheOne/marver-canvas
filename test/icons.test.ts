@@ -71,7 +71,7 @@ describe('icon barrels', () => {
     mkdirSync(join(root, 'design', 'scenes', 'x'), { recursive: true })
     mkdirSync(join(root, 'design', 'node_modules', 'y'), { recursive: true })
     writeFileSync(join(root, 'design', 'scenes', 'x', 'a.tsx'), `import { Truck, Nope, type IconProps } from '@phosphor-icons/react'\nimport { ChevronDown } from 'lucide-react'`)
-    writeFileSync(join(root, 'design', 'scenes', 'b.jsx'), `import { ActivityIcon } from '@phosphor-icons/react'`)
+    writeFileSync(join(root, 'design', 'scenes', 'b.jsx'), `import { /* the glyph */ ActivityIcon, // trailing\n } from '@phosphor-icons/react'`)
     writeFileSync(join(root, 'design', 'node_modules', 'y', 'c.tsx'), `import { Pulse } from '@phosphor-icons/react'`)
     expect(iconModules(root)).toEqual(['@phosphor-icons/react/dist/csr/Pulse', '@phosphor-icons/react/dist/csr/Truck', 'lucide-react/dist/esm/icons/chevron-down.mjs'])
   })

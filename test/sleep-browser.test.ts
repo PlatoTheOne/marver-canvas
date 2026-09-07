@@ -362,6 +362,24 @@ describe('sleep in place, on a real dev canvas', () => {
     expect(await ev(`fetch(${JSON.stringify(before[0])}, { cache: 'no-store' }).then((r) => r.status)`)).toBe(404)   // pruned on the server; the browser cache is beside the point
   })
 
+  skippable('a reload navigates the frame exactly once, and a deleted frame comes back admitted, booted and asleep', async () => {
+    await rested()
+    const loads = `(() => { const f = document.querySelector('iframe.sh-live[title="app/glass"]'); return f.__loads ?? -1 })()`
+    await ev(`(() => { const f = document.querySelector('iframe.sh-live[title="app/glass"]'); f.__loads = 0; f.addEventListener('load', () => f.__loads++); return 1 })()`)
+    await ev(`${ST}.reloadFrame('g1', false)`)
+    await until(`${NODE('g1')}.status === 'ready' && ${DOC('app/glass')}?.body?.textContent.includes('Past due')`)
+    await wait(1500)
+    expect(await ev(loads), 'loads after one reload').toBe(1)
+    // the file goes: the node shows a card (no iframe); it returns: a new document, admitted, ready, asleep
+    const { renameSync } = await import('node:fs')
+    renameSync(glassFile(), glassFile() + '.away')
+    await until(`${NODE('g1')}.missing === true && !document.querySelector('iframe.sh-live[title="app/glass"]')`, 30_000)
+    renameSync(glassFile() + '.away', glassFile())
+    await until(`${NODE('g1')}.missing !== true && ${NODE('g1')}.status === 'ready'`, 60_000)
+    await bothAsleep()
+    expect(await ev(`${ST}.nodes.filter((n) => n.readyRetried).length`)).toBe(0)
+  })
+
   skippable('a board of many frames boots a few at a time, nearest the centre first, every frame navigating once', async () => {
     await onBoard()
     await ev(`window.__mvAdmitted = []; location.hash = '#/b/many'`)
