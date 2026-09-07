@@ -279,7 +279,7 @@ describe('sleep in place, on a real dev canvas', () => {
     await ev(`${ST}.select(null)`)
   })
 
-  skippable('a texture that does not decode leaves the glass live under the pause alone (never blind under blur(0px))', async () => {
+  skippable('a texture that does not decode leaves the glass live under the pause alone (never an effect stripped of its texture)', async () => {
     await rested()
     const urls: string[] = await ev(TEXTURE_URLS('app/glass'))
     const [, , , gen, key] = urls[0].split('/')

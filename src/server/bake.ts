@@ -24,10 +24,9 @@
  *      the reference; then re-apply only what passed and certify THAT composition (a rejected
  *      neighbour changes a backdrop); then check that no element's box moved
  *
- * The override the shell will use is the one certified here: `backdrop-filter: blur(0px)` (the
- * element stays an effect layer whose surface Chrome caches and reads nothing back for - measured
- * better than `none` on identity and on frame drops) with the texture under the element's own
- * background layers. Nothing else on the element; layout is never touched.
+ * The override the shell will use is the one certified here (src/shared/sleep-rule.ts):
+ * `backdrop-filter: none` under a static `filter` (the containing block stays, the compositor layer
+ * goes) with the texture under the element's own background layers. Layout is never touched.
  */
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'

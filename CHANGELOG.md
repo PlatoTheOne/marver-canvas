@@ -11,10 +11,13 @@ Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](ht
   animations pause and every `backdrop-filter` element (the glass that made a 4-frame hi-fi
   board checkerboard at 20-70 % zoom) wears a static texture of its own filtered backdrop,
   computed and certified pixel by pixel by the dev server in headless Chrome, under
-  `backdrop-filter: blur(0px)`. Interact mode wakes the frame by removing one `<style>`; laser,
-  comment pins and selection work on the sleeping document as it is. Nothing is copied, so
-  nothing can shift at the transition: measured on real frames at 200 % zoom, 29 pixels of
-  5.2 million differ from the live paint by more than 8 levels, none by more than 32.
+  `backdrop-filter: none` and a static `filter` (the containing block stays, the compositor
+  layer goes: a sleeping frame is one layer to raster, not thirty). Interact mode wakes the
+  frame by removing one `<style>`; laser, comment pins and selection work on the sleeping
+  document as it is. Nothing is copied, so nothing can shift at the transition: measured on
+  real frames in a window at 200 % zoom, 29 pixels of 5.2 million differ from the live paint
+  by more than 8 levels, none by more than 32. During a pan or a zoom the presented frames
+  stay whole where the live board leaves the frame body blank.
   Markdown, image, slide and lo-fi frames have nothing to compile and never ask the server.
 - Theme flips and resizes wake the frame first and sleep it again once it has settled at the
   new theme or size; an edit (HMR) or a reload does the same under a new source generation, so

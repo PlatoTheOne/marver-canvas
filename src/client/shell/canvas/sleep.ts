@@ -20,7 +20,7 @@
  * with the pause alone and its glass stays live: never an effect layer without its texture.
  *
  * Safety: the override is all or nothing - every target's selector must resolve to an element whose
- * border box is the one the server measured (0.02 px) and whose filter is still the one baked, or
+ * border box is the one the server measured (half a pixel) and whose filter is still the one baked, or
  * the frame stays live. Wake restores the live effects under `transition: none` (an authored
  * transition on backdrop-filter or background must not animate out of the sleep), then removes the
  * <style> and the attributes on the next frame.
@@ -33,6 +33,11 @@ interface Target { sel: string; rect: { x: number; y: number; w: number; h: numb
 type Answer = { ok: true; targets: Target[] } | { ok: false; error: string }
 
 const STYLE_ID = 'mv-sleep'
+/** How far (CSS px) an element's border box may sit from the one the compiler measured. Headless and
+ *  headed Chrome shape text a few hundredths of a pixel apart (a 784 px pill measures 784.09 in a
+ *  window, 784.125 in the compiler), which is invisible under a texture stretched to the box; a
+ *  different wrap, size or place is a whole line or more and still refuses the frame. */
+const TOL = 0.5
 /** `?awake=1` keeps every frame live - the diagnostic switch the identity probes compare against. */
 const AWAKE = new URLSearchParams(location.search).get('awake') === '1'
 const PAUSE = `*,*::before,*::after{animation-play-state:paused!important}`
@@ -152,7 +157,7 @@ function install(doc: Document, targets: Target[]): boolean {
     try { el = doc.querySelector(t.sel) } catch { /* a selector from another document shape */ }
     if (!el) return false
     const r = el.getBoundingClientRect()
-    if (Math.abs(r.x - t.rect.x) > 0.02 || Math.abs(r.y - t.rect.y) > 0.02 || Math.abs(r.width - t.rect.w) > 0.02 || Math.abs(r.height - t.rect.h) > 0.02) return false
+    if (Math.abs(r.x - t.rect.x) > TOL || Math.abs(r.y - t.rect.y) > TOL || Math.abs(r.width - t.rect.w) > TOL || Math.abs(r.height - t.rect.h) > TOL) return false
     const cs = doc.defaultView!.getComputedStyle(el)
     if ((cs.backdropFilter || (cs as unknown as { webkitBackdropFilter?: string }).webkitBackdropFilter || 'none') !== t.filter) return false
     rules.push(sleepRule(`[data-mv-sleep="${i}"]`, readOwn(cs), t.texture))
