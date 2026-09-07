@@ -22,8 +22,8 @@
  * Safety: the override is all or nothing - every target's selector must resolve to an element whose
  * border box is the one the server measured (half a pixel) and whose filter is still the one baked, or
  * the frame stays live. Wake restores the live effects under `transition: none` (an authored
- * transition on backdrop-filter or background must not animate out of the sleep), then removes the
- * <style> and the attributes on the next frame.
+ * transition on backdrop-filter, filter or background must not animate out of the sleep, nor into
+ * it), then removes the <style> and the attributes.
  */
 import { ROUTE } from '../../const.ts'
 import { readOwn, sleepRule } from '../../../shared/sleep-rule.ts'
@@ -33,10 +33,10 @@ interface Target { sel: string; rect: { x: number; y: number; w: number; h: numb
 type Answer = { ok: true; targets: Target[] } | { ok: false; error: string }
 
 const STYLE_ID = 'mv-sleep'
-/** How far (CSS px) an element's border box may sit from the one the compiler measured. Headless and
- *  headed Chrome shape text a few hundredths of a pixel apart (a 784 px pill measures 784.09 in a
- *  window, 784.125 in the compiler), which is invisible under a texture stretched to the box; a
- *  different wrap, size or place is a whole line or more and still refuses the frame. */
+/** How far (CSS px) any EDGE of an element's border box may sit from the one the compiler measured.
+ *  Headless and headed Chrome shape text a few hundredths of a pixel apart (a 784 px pill measures
+ *  784.09 in a window, 784.125 in the compiler), which is invisible under a texture stretched to
+ *  the box; a different wrap, size or place is a whole line or more and still refuses the frame. */
 const TOL = 0.5
 /** `?awake=1` keeps every frame live - the diagnostic switch the identity probes compare against. */
 const AWAKE = new URLSearchParams(location.search).get('awake') === '1'
@@ -103,6 +103,8 @@ export async function sleep(nodeKey: string, iframe: HTMLIFrameElement, key: Sle
   const mine = ++seq
   pending.set(nodeKey, mine)
   const current = () => pending.get(nodeKey) === mine && iframe.contentDocument === doc
+  // the compiler measured after the frame's fonts; so does the gate below
+  if (doc.fonts) { await doc.fonts.ready; if (!current()) return 'live' }
   if (!hasEffects(doc)) {
     // nothing to compile: the pause alone is this frame's sleep
     if (!current()) return 'live'
@@ -135,15 +137,22 @@ export function wake(nodeKey: string, iframe: HTMLIFrameElement | null): void {
   const doc = iframe?.contentDocument
   const st = doc?.getElementById(STYLE_ID)
   if (!doc || !st) return
-  // the effects return under an INLINE important `transition: none` (it outranks any authored
-  // important transition), computed NOW - a forced style recalc is a style change event; then the
-  // rule, the attributes and the inline suppression go, with no property left to animate
   const els = [...doc.querySelectorAll<HTMLElement>('[data-mv-sleep]')]
-  const authored = els.map((el) => [el.style.getPropertyValue('transition'), el.style.getPropertyPriority('transition')] as const)
-  for (const el of els) el.style.setProperty('transition', 'none', 'important')
-  st.remove()
+  still(doc, els, () => st.remove())
+  for (const el of els) el.removeAttribute('data-mv-sleep')
+}
+
+/** Run `change` with no transition able to start on `els`: an INLINE important
+ *  `transition-property: none` (it outranks an authored important transition), the change, one
+ *  forced style recalc - a style change event with nothing to animate - then the authored longhand
+ *  back. Only the longhand is touched: an inline `transition-duration` alone does not serialize
+ *  through the shorthand, and a shorthand round trip would have deleted it. */
+function still(doc: Document, els: HTMLElement[], change: () => void): void {
+  const authored = els.map((el) => [el.style.getPropertyValue('transition-property'), el.style.getPropertyPriority('transition-property')] as const)
+  for (const el of els) el.style.setProperty('transition-property', 'none', 'important')
+  change()
   void doc.documentElement.offsetWidth
-  els.forEach((el, i) => { const [v, p] = authored[i]; if (v) el.style.setProperty('transition', v, p); else el.style.removeProperty('transition'); el.removeAttribute('data-mv-sleep') })
+  els.forEach((el, i) => { const [v, p] = authored[i]; if (v) el.style.setProperty('transition-property', v, p); else el.style.removeProperty('transition-property') })
 }
 
 /** Install the override for the targets. All or nothing: a target whose element is not exactly the
@@ -151,21 +160,23 @@ export function wake(nodeKey: string, iframe: HTMLIFrameElement | null): void {
 function install(doc: Document, targets: Target[]): boolean {
   doc.querySelectorAll('[data-mv-sleep]').forEach((el) => el.removeAttribute('data-mv-sleep'))
   const rules: string[] = [PAUSE]
-  const els: Element[] = []
+  const els: HTMLElement[] = []
   for (const [i, t] of targets.entries()) {
-    let el: Element | null = null
-    try { el = doc.querySelector(t.sel) } catch { /* a selector from another document shape */ }
+    let el: HTMLElement | null = null
+    try { el = doc.querySelector<HTMLElement>(t.sel) } catch { /* a selector from another document shape */ }
     if (!el) return false
     const r = el.getBoundingClientRect()
-    if (Math.abs(r.x - t.rect.x) > TOL || Math.abs(r.y - t.rect.y) > TOL || Math.abs(r.width - t.rect.w) > TOL || Math.abs(r.height - t.rect.h) > TOL) return false
+    if (Math.abs(r.x - t.rect.x) > TOL || Math.abs(r.y - t.rect.y) > TOL || Math.abs(r.right - t.rect.x - t.rect.w) > TOL || Math.abs(r.bottom - t.rect.y - t.rect.h) > TOL) return false
     const cs = doc.defaultView!.getComputedStyle(el)
     if ((cs.backdropFilter || (cs as unknown as { webkitBackdropFilter?: string }).webkitBackdropFilter || 'none') !== t.filter) return false
     rules.push(sleepRule(`[data-mv-sleep="${i}"]`, readOwn(cs), t.texture))
     els.push(el)
   }
-  els.forEach((el, i) => el.setAttribute('data-mv-sleep', String(i)))
   let st = doc.getElementById(STYLE_ID)
   if (!st) { st = doc.createElement('style'); st.id = STYLE_ID; (doc.head ?? doc.documentElement).appendChild(st) }
-  st.textContent = rules.join('\n')
+  const style = st
+  // one paint, and no authored transition (`transition: all` is common on a pill) may animate the
+  // effect out or the texture in
+  still(doc, els, () => { els.forEach((el, i) => el.setAttribute('data-mv-sleep', String(i))); style.textContent = rules.join('\n') })
   return true
 }

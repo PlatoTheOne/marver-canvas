@@ -17,7 +17,10 @@ Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](ht
   document as it is. Nothing is copied, so nothing can shift at the transition: measured on
   real frames in a window at 200 % zoom, 29 pixels of 5.2 million differ from the live paint
   by more than 8 levels, none by more than 32. During a pan or a zoom the presented frames
-  stay whole where the live board leaves the frame body blank.
+  stay whole where the live board leaves the frame body blank. The one residual: at a zoom
+  that puts a glass element on fractional device pixels, Chrome resamples the live effect
+  layer and paints the sleeping element at its true position, so its edge rows can differ by
+  up to 32 levels at the wake.
   Markdown, image, slide and lo-fi frames have nothing to compile and never ask the server.
 - Theme flips and resizes wake the frame first and sleep it again once it has settled at the
   new theme or size; an edit (HMR) or a reload does the same under a new source generation, so
@@ -27,7 +30,8 @@ Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](ht
 
 - `POST /__mv/api/bakes` (owner-gated) compiles frames in batch; textures are cached on disk
   under `design/.local/bakes/<generation>/` and served immutable. Identical asks share one
-  compile; a compile the source outran is dropped.
+  compile; a compile the source outran is dropped; two dev servers on one project keep their
+  own generations.
 
 ### Caveats
 

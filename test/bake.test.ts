@@ -102,6 +102,37 @@ describe('the compiler (bake.ts)', () => {
     expect(r.rejected).toBe(1)
   })
 
+  skippable('paint that changes outside every glass box - the pill itself fine - ships nothing', async () => {
+    const r = await bake('outside')
+    if (!r.ok) throw new Error(r.error)
+    expect(r.targets).toHaveLength(1)
+    expect(r.targets[0].maxErr).toBeLessThanOrEqual(32)   // inside the glass, certified
+    expect(r.targets[0].verified).toBe(false)              // the frame around it was not
+    expect(r.outside!.blockMax).toBeGreaterThan(64)
+  })
+
+  it('pruning spares a generation another live server owns, and drops a dead one', async () => {
+    const { pruneBakes } = await import('../src/server/bake.ts')
+    const { mkdtempSync, mkdirSync, writeFileSync, existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const { tmpdir } = await import('node:os')
+    const { spawn } = await import('node:child_process')
+    const root = mkdtempSync(join(tmpdir(), 'mv-prune-'))
+    const base = join(root, 'design', '.local', 'bakes')
+    const other = spawn('sleep', ['30'])
+    try {
+      for (const [gen, owner] of [['100', String(other.pid)], ['200', '999999'], ['300', String(process.pid)], ['400', '']]) {
+        mkdirSync(join(base, gen), { recursive: true })
+        if (owner) writeFileSync(join(base, gen, 'owner'), owner)
+      }
+      pruneBakes(root, 500)
+      expect(existsSync(join(base, '100')), 'a live server\'s generation').toBe(true)
+      expect(existsSync(join(base, '200')), 'a dead server\'s generation').toBe(false)
+      expect(existsSync(join(base, '300')), 'this server\'s own older generation').toBe(false)
+      expect(existsSync(join(base, '400')), 'an ownerless generation').toBe(false)
+    } finally { other.kill() }
+  })
+
   skippable('an authored background-clip keeps the tint off a transparent border, and the perimeter certifies', async () => {
     const r = await bake('clip')
     if (!r.ok) throw new Error(r.error)

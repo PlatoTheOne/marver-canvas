@@ -21,5 +21,8 @@ export const PAGES: Record<string, string> = {
   // glass certify, the geometry guard must still reject everything
   moving: page(`<div id="pill" class="glass" style="${PILL}">a still pill</div><div id="other" style="position:absolute;left:400px;top:300px;width:60px;height:40px;background:#123">other</div>`, 'html:has(#mv-bake-style) #other{margin-left:7px}'),
   // a transparent border with the colour clipped to the padding box: the tint must stay off the border
+  // the override changes paint OUTSIDE every glass box (a rule keyed on the compiler's own style
+  // element carrying rules): the pill certifies, the frame does not, nothing ships
+  outside: page(`<div id="pill" class="glass" style="${PILL}">a fine pill</div><div id="other" style="position:absolute;left:400px;top:300px;width:60px;height:40px;background:#123">other</div>`, 'head:has(#mv-bake-style:not(:empty)) + body #other{background:#f00 !important}'),
   clip: page(`<div id="pill" class="glass" style="${PILL};border:4px solid transparent;background-clip:padding-box">clipped tint</div>`),
 }

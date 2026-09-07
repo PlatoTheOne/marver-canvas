@@ -14,8 +14,9 @@
  * while the pills draw (research/hifi/glitch.ts). `blur(0px)` measured better only in headless
  * Chrome, whose forced screenshots never show a missing tile. A static `filter` keeps what the
  * backdrop-filter gave layout - the containing block of fixed descendants (a hidden checkbox input
- * is one) and the stacking context - without a compositor layer: `opacity(1)` when the author set
- * none, the author's own filter otherwise.
+ * is one) and the stacking context - without a direct compositing reason (a video, a canvas or a
+ * will-change inside still promotes that one element): `opacity(1)` when the author set none, the
+ * author's own filter otherwise.
  */
 export interface OwnBackground { img: string; color: string; size: string; pos: string; rep: string; org: string; clip: string; filter: string }
 

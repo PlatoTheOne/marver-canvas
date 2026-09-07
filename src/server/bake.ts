@@ -47,7 +47,7 @@ export interface BakeTarget {
   bad: number
 }
 export type BakeResult =
-  | { ok: true; targets: BakeTarget[]; levels: number; rejected: number; ms: number }
+  | { ok: true; targets: BakeTarget[]; levels: number; rejected: number; ms: number; outside?: Outside }
   | { ok: false; error: string }
 
 const DSF = 2
@@ -111,6 +111,8 @@ const APPLY = `((level, bakes) => {
   let st = document.getElementById('mv-bake-style')
   if (!st) { st = document.createElement('style'); st.id = 'mv-bake-style'; document.head.appendChild(st) }
   const rules = []
+  // no authored transition may animate the override in: the shell installs it the same way
+  for (const el of document.querySelectorAll('[data-mv-bake]')) el.style.setProperty('transition-property', 'none', 'important')
   for (const el of document.querySelectorAll('[data-mv-bake]')) {
     const i = el.getAttribute('data-mv-bake')
     const b = bakes.find((x) => String(x.i) === i)
@@ -199,13 +201,15 @@ const NEAR = `((a, b) => (async () => {
   return true
 })())`
 
-/** Runs in the frame page: diff \`baked\` against \`reference\` inside each target's rounded shape. */
+/** Runs in the frame page: diff \`baked\` against \`reference\` inside each target's rounded shape,
+ *  and over the rest of the frame - an override may not change one pixel outside the boxes it owns. */
 const CERTIFY = `((reference, baked, rects, width) => (async () => {
   const load = (d) => new Promise((r) => { const im = new Image(); im.onload = () => r(im); im.src = 'data:image/png;base64,' + d })
   const [ia, ib] = await Promise.all([load(reference), load(baked)])
   const px = (im) => { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(im, 0, 0); return { d: g.getImageData(0, 0, c.width, c.height).data, w: c.width, h: c.height } }
   const A = px(ia), B = px(ib), k = A.w / width, E = 3
-  return rects.map((t) => {
+  const owned = new Uint8Array(A.w * A.h)
+  const verdicts = rects.map((t) => {
     const x0 = Math.max(0, Math.floor(t.rect.x * k) + E), y0 = Math.max(0, Math.floor(t.rect.y * k) + E)
     const x1 = Math.min(A.w, Math.ceil((t.rect.x + t.rect.w) * k) - E), y1 = Math.min(A.h, Math.ceil((t.rect.y + t.rect.h) * k) - E)
     const el = document.querySelector(t.sel); const cs = el ? getComputedStyle(el) : null
@@ -225,6 +229,7 @@ const CERTIFY = `((reference, baked, rects, width) => (async () => {
     const X1 = Math.min(A.w, Math.ceil((t.rect.x + t.rect.w) * k)), Y1 = Math.min(A.h, Math.ceil((t.rect.y + t.rect.h) * k))
     let maxErr = 0, bad = 0, n = 0, ringBad = 0, ringN = 0
     for (let y = Y0; y < Y1; y++) for (let x = X0; x < X1; x++) {
+      owned[y * A.w + x] = 1
       const i = (y * A.w + x) * 4
       const d = Math.max(Math.abs(A.d[i] - B.d[i]), Math.abs(A.d[i+1] - B.d[i+1]), Math.abs(A.d[i+2] - B.d[i+2]))
       if (x >= x0 && x < x1 && y >= y0 && y < y1 && inside(x, y)) { if (d > maxErr) maxErr = d; if (d > 8) bad++; n++ }
@@ -232,11 +237,28 @@ const CERTIFY = `((reference, baked, rects, width) => (async () => {
     }
     return { maxErr, bad, n, ringBad, ringN }
   })
+  // outside every box: a changed pixel here is an anti-aliased edge next to a former layer (sparse,
+  // a few per block) or a real change of paint (a blob) - counted per 16x16 device-pixel block
+  const cols = Math.ceil(A.w / 16), blocks = new Uint16Array(cols * Math.ceil(A.h / 16))
+  let maxErr = 0, bad = 0, gt32 = 0, n = 0, blockMax = 0
+  for (let p = 0; p < owned.length; p++) {
+    if (owned[p]) continue
+    const i = p * 4
+    const d = Math.max(Math.abs(A.d[i] - B.d[i]), Math.abs(A.d[i+1] - B.d[i+1]), Math.abs(A.d[i+2] - B.d[i+2]))
+    if (d > maxErr) maxErr = d; if (d > 8) bad++; n++
+    if (d > 32) { gt32++; const b = ((p / A.w) >> 4) * cols + ((p % A.w) >> 4); if (++blocks[b] > blockMax) blockMax = blocks[b] }
+  }
+  return { verdicts, outside: { maxErr, bad, gt32, n, blockMax } }
 })())`
 
 type Verdict = { maxErr: number; bad: number; n: number; ringBad: number; ringN: number }
+type Outside = { maxErr: number; bad: number; gt32: number; n: number; blockMax: number }
 const passes = (v: Verdict | undefined): boolean =>
   !!v && v.n >= 64 && v.maxErr <= 32 && v.bad <= v.n * 0.005 && v.ringBad <= v.ringN * 0.05
+/** The frame outside the boxes: at most 0.05 % of its pixels beyond 32 levels and no 16x16 block
+ *  more than a quarter changed (measured: 154 of 2.5 M, 22 per block at worst, on the largest real
+ *  frame; a 60x40 CSS px blob fills its blocks). */
+const untouched = (o: Outside | undefined): boolean => !!o && o.gt32 <= o.n * 0.0005 && o.blockMax <= 64
 
 /** Compile one frame inside a browser the caller owns. */
 export async function bakeIn(b: Browser, opts: { url: string; width: number; height: number }): Promise<BakeResult> {
@@ -342,19 +364,23 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
       const baked = await capture()
       if (process.env.MV_BAKE_DEBUG) { const d = join(process.env.MV_BAKE_DEBUG, new URL(url).pathname.replace(/[^\w.-]+/g, '_')); mkdirSync(d, { recursive: true }); writeFileSync(join(d, 'reference.png'), Buffer.from(reference, 'base64')); writeFileSync(join(d, `baked-${set.length}.png`), Buffer.from(baked, 'base64')) }
       const rects = set.map((s) => done.get(s.i)!).map((t) => ({ sel: t.sel, rect: t.rect }))
-      return (await ev(`${CERTIFY}(${JSON.stringify(reference)}, ${JSON.stringify(baked)}, ${JSON.stringify(rects)}, ${width})`, true)) as Verdict[]
+      return (await ev(`${CERTIFY}(${JSON.stringify(reference)}, ${JSON.stringify(baked)}, ${JSON.stringify(rects)}, ${width})`, true)) as { verdicts: Verdict[]; outside: Outside }
     }
     // certification until the admitted set IS the composition that was rendered: a rejected
     // neighbour changes a backdrop, so every rejection re-certifies the rest (one round per level
     // at most; a set that never settles ships nothing)
-    let set = bakes, settled = false
+    let set = bakes, settled = false, outside: Outside | undefined
     for (let round = 0; set.length && round <= levels + 1 && !settled; round++) {
-      const verdicts = await certify(set)
+      const { verdicts, outside: o } = await certify(set)
+      outside = o
       set.forEach((s, k) => { const t = done.get(s.i)!; t.verified = passes(verdicts[k]); t.maxErr = verdicts[k]?.maxErr ?? 255; t.bad = verdicts[k]?.bad ?? -1 })
       const next = set.filter((s) => done.get(s.i)!.verified)
       settled = next.length === set.length
       set = next
     }
+    // the rest of the frame, under the composition that settled: a filter groups an element's whole
+    // painted subtree, so what the boxes do not own is certified too, or nothing ships
+    if (settled && set.length && !untouched(outside)) settled = false
     if (!settled) for (const s of set) done.get(s.i)!.verified = false
     // the geometry guard: the shipped override must not move any box (a lost containing block would)
     const geometryAfter = (await ev(GEOMETRY)) as number[][]
@@ -362,7 +388,7 @@ export async function bakeIn(b: Browser, opts: { url: string; width: number; hei
     if (moved) for (const t of done.values()) t.verified = false
 
     const out = [...done.values()]
-    return { ok: true, targets: out, levels, rejected: out.filter((t) => !t.verified).length, ms: Date.now() - t0 }
+    return { ok: true, targets: out, levels, rejected: out.filter((t) => !t.verified).length, ms: Date.now() - t0, outside }
   } catch (err) {
     return { ok: false, error: (err as Error).message }
   } finally {
@@ -409,9 +435,12 @@ function writeCached(root: string, gen: number, ask: BakeAsk, r: Extract<BakeRes
   const dir = cacheDir(root, gen, key)
   // bounded: at most KEYS_PER_GEN compiled sizes and themes per generation, the least recently
   // used evicted - never one the current response names
+  const gdir = join(root, 'design', '.local', 'bakes', String(gen))
+  // the generation belongs to this server for as long as it lives (see pruneBakes)
+  mkdirSync(gdir, { recursive: true })
+  if (!existsSync(join(gdir, 'owner'))) writeFileSync(join(gdir, 'owner'), String(process.pid))
   try {
-    const gdir = join(root, 'design', '.local', 'bakes', String(gen))
-    const names = readdirSync(gdir).filter((n) => !n.includes('.tmp-') && n !== key && !protect.has(n))
+    const names = readdirSync(gdir).filter((n) => !n.includes('.tmp-') && n !== key && n !== 'owner' && !protect.has(n))
     if (names.length >= KEYS_PER_GEN) names.map((n) => ({ n, t: statSync(join(gdir, n)).mtimeMs })).sort((a, b) => a.t - b.t).slice(0, names.length - KEYS_PER_GEN + 1).forEach(({ n }) => rmSync(join(gdir, n), { recursive: true, force: true }))
   } catch { /* no generation directory yet */ }
   const tmp = `${dir}.tmp-${process.pid}`
@@ -423,19 +452,27 @@ function writeCached(root: string, gen: number, ask: BakeAsk, r: Extract<BakeRes
     writeFileSync(join(tmp, name), Buffer.from(t.texture.slice(t.texture.indexOf(',') + 1), 'base64'))
     return { ...t, texture: name }
   })
-  writeFileSync(join(tmp, 'bake.json'), JSON.stringify({ targets, levels: r.levels, rejected: r.rejected, ms: r.ms }))
+  writeFileSync(join(tmp, 'bake.json'), JSON.stringify({ targets, levels: r.levels, rejected: r.rejected, ms: r.ms, outside: r.outside }))
   rmSync(dir, { recursive: true, force: true })
   try { renameSync(tmp, dir) } catch (e) { rmSync(tmp, { recursive: true, force: true }); throw new Error(`could not write the compiled frame: ${(e as Error).message}`) }
   return { ...ask, ok: true, targets: targets.map((t) => ({ ...t, texture: t.verified ? `${urlBase}/${gen}/${key}/${t.texture}` : '' })), levels: r.levels, rejected: r.rejected, ms: r.ms }
 }
 
-/** Drop every generation but the current one (called when the generation bumps). */
+const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' } }
+
+/** Drop every generation but the current one and those another live server owns (called at start
+ *  and when the generation bumps). */
 export function pruneBakes(root: string, keep: number): void {
   const base = join(root, 'design', '.local', 'bakes')
   if (!existsSync(base) || !cacheInside(root)) return
   try {
     for (const name of readdirSync(base)) {
-      if (name !== String(keep)) rmSync(join(base, name), { recursive: true, force: true })
+      if (name === String(keep)) continue
+      // another server on the same project owns its generation for as long as it lives
+      let owner = 0
+      try { owner = Number(readFileSync(join(base, name, 'owner'), 'utf8')) } catch { /* no owner: nothing was ever written */ }
+      if (owner && owner !== process.pid && alive(owner)) continue
+      rmSync(join(base, name), { recursive: true, force: true })
     }
   } catch { /* best-effort */ }
 }
