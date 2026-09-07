@@ -20,7 +20,7 @@ import type { Plugin } from 'vite'
  *  original text. */
 export function keepBackdropFilter(css: string): string {
   const masked = css.replace(/\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, (m) => ' '.repeat(m.length))
-  const PREFIXED = /(^|[^-\w])-webkit-backdrop-filter\s*:\s*([^;{}]+)/gi
+  const PREFIXED = /(^|[^-\w])-webkit-backdrop-filter\s*:/gi   // a candidate; the declaration split below decides
   const seen = new Set<number>()
   const edits: { at: number; text: string }[] = []
   for (const m of masked.matchAll(PREFIXED)) {
@@ -44,11 +44,24 @@ export function keepBackdropFilter(css: string): string {
       if (depth) own[i] = ' '
       if (c === '}') { depth--; if (depth === 0) seg = i + 1 }
     }
+    // the list's declarations: split on `;` outside parentheses, the property before the first colon
     const list = own.join('')
-    if (/(^|[^-\w])backdrop-filter\s*:/i.test(list)) continue
-    for (const x of list.matchAll(PREFIXED)) {
-      const at = open + 1 + x.index! + x[0].length, value = css.slice(at - x[2].length, at).trim()
-      if (value) edits.push({ at, text: `;backdrop-filter:${value}` })
+    const decls: { prop: string; valueAt: number; end: number }[] = []
+    let paren = 0, from = 0
+    for (let i = 0; i <= list.length; i++) {
+      const c = list[i]
+      if (c === '(') paren++; else if (c === ')') paren = Math.max(0, paren - 1)
+      if (i === list.length || (c === ';' && paren === 0)) {
+        const text = list.slice(from, i), colon = text.indexOf(':')
+        if (colon > 0) decls.push({ prop: text.slice(0, colon).trim().toLowerCase(), valueAt: from + colon + 1, end: i })
+        from = i + 1
+      }
+    }
+    if (decls.some((x) => x.prop === 'backdrop-filter')) continue
+    for (const x of decls) {
+      if (x.prop !== '-webkit-backdrop-filter') continue
+      const value = css.slice(open + 1 + x.valueAt, open + 1 + x.end).trim()
+      if (value) edits.push({ at: open + 1 + x.end, text: `;backdrop-filter:${value}` })
     }
   }
   let out = css

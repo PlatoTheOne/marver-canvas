@@ -42,4 +42,9 @@ describe('keepBackdropFilter', () => {
     const css = '@media (min-width: 1px) {\n  @supports (backdrop-filter: blur(1px)) {\n    .a { -webkit-backdrop-filter: blur(2px); }\n  }\n}'
     expect(keepBackdropFilter(css)).toBe('@media (min-width: 1px) {\n  @supports (backdrop-filter: blur(1px)) {\n    .a { -webkit-backdrop-filter: blur(2px);backdrop-filter:blur(2px); }\n  }\n}')
   })
+  it('declaration boundaries: a property name inside a custom property value is a value; a semicolon inside url() is a value', () => {
+    expect(keepBackdropFilter('.a{--x:backdrop-filter:none;-webkit-backdrop-filter:blur(2px)}')).toBe('.a{--x:backdrop-filter:none;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}')
+    expect(keepBackdropFilter('.b{--x:-webkit-backdrop-filter:blur(9px);color:red}')).toBe('.b{--x:-webkit-backdrop-filter:blur(9px);color:red}')
+    expect(keepBackdropFilter('.c{-webkit-backdrop-filter:url(#a;b);color:red}')).toBe('.c{-webkit-backdrop-filter:url(#a;b);backdrop-filter:url(#a;b);color:red}')
+  })
 })
