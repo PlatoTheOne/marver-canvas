@@ -8,6 +8,7 @@ import { NAME, PKG } from '../cli/name.ts'
 import { loadConfig } from './config.ts'
 import { detectHost } from './detect.ts'
 import { marverPlugin, tailwind3Css, tailwind4Plugin } from './plugin.ts'
+import { iconModules, iconsPlugin } from './icons.ts'
 
 /** packageDir = the installed marver package root (dist/cli.js lives one level down). */
 function packageDir(): string {
@@ -161,7 +162,7 @@ export async function dev(root: string, portFlag?: number) {
   let css: Record<string, unknown> | undefined
   if (host.tailwind === 3) css = (await tailwind3Css(root)) ?? undefined
 
-  plugins.push(marverPlugin({ root, clientDir, config, detectedThemeCss: host.themeCss }))
+  plugins.push(marverPlugin({ root, clientDir, config, detectedThemeCss: host.themeCss }), iconsPlugin(root))
 
   // ~35 lines of "Sourcemap for react-zoom-pan-pinch points to missing sources" per boot
   // (their published map is broken, not actionable here) were burying the warnings that
@@ -233,6 +234,7 @@ export async function dev(root: string, portFlag?: number) {
       include: [
         'react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime',
         `${PKG} > marked`, `${PKG} > mermaid`, `${PKG} > html-to-image`,
+        ...iconModules(root),   // the per-icon modules the design imports (icons.ts), bundled up front
       ],
       entries: [join(clientDir, 'frame-host', 'index.html'), 'design/**/*.{tsx,jsx}'],
     },

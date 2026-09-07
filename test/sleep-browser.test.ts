@@ -73,6 +73,9 @@ beforeAll(async () => {
   writeFileSync(join(boards, 'other.json'), JSON.stringify({ version: 1, name: 'other', order: 1, auto: false, nodes: [
     { key: 'p2', frame: 'app/plain', x: 0, y: 0, w: 400, h: 300 },
   ] }))
+  // a board of many frames: admission boots a few at a time, nearest the viewport centre first
+  writeFileSync(join(boards, 'many.json'), JSON.stringify({ version: 1, name: 'many', order: 2, auto: false, nodes:
+    Array.from({ length: 12 }, (_, i) => ({ key: `m${i}`, frame: 'app/plain', x: (i % 4) * 500, y: Math.floor(i / 4) * 400, w: 400, h: 300 })) }))
   server = spawn(process.execPath, [CLI, 'dev', '--root', root, '--port', String(PORT)], { cwd: root, stdio: 'pipe', env: { ...process.env, BROWSER: 'none', CI: '1' } })
   server.stdout?.on('data', (d) => { log += d })
   server.stderr?.on('data', (d) => { log += d })
@@ -357,6 +360,40 @@ describe('sleep in place, on a real dev canvas', () => {
     const after: string[] = await ev(TEXTURE_URLS('app/glass'))
     expect(after[0].split('/')[3]).not.toBe(genBefore)   // the old generation can never be served again
     expect(await ev(`fetch(${JSON.stringify(before[0])}, { cache: 'no-store' }).then((r) => r.status)`)).toBe(404)   // pruned on the server; the browser cache is beside the point
+  })
+
+  skippable('a board of many frames boots a few at a time, nearest the centre first, every frame navigating once', async () => {
+    await onBoard()
+    await ev(`window.__mvAdmitted = []; location.hash = '#/b/many'`)
+    await until(`${ST}.nodes.length === 12`)
+    // while loading, at most SLOTS iframes carry a src (the rest wait, silent by design)
+    const withSrc = `[...document.querySelectorAll('iframe.sh-live')].filter((f) => f.getAttribute('src')).length`
+    const loading = `${ST}.nodes.filter((n) => n.status === 'loading').length`
+    let peak = 0, polls = 0
+    const cam: string[] = []
+    const t0 = Date.now()
+    while (Date.now() - t0 < 4000 && (await ev(loading)) > 0) {
+      polls++
+      peak = Math.max(peak, (await ev(withSrc)) - (12 - (await ev(loading))))   // iframes with a src that are not ready yet
+      if (process.env.MV_TEST_DUMP) cam.push(await ev(`(() => { const cs = getComputedStyle(document.querySelector('.sh-app')); const f = document.querySelector('.sh-node').getBoundingClientRect(); return [performance.now() | 0, ${ST}.nodes.filter((n) => n.status === 'ready').length, cs.getPropertyValue('--sh-tx'), cs.getPropertyValue('--sh-ty'), cs.getPropertyValue('--sh-s'), Math.round(f.x), Math.round(f.y), Math.round(f.width)].join(' ') })()`))
+      await wait(40)
+    }
+    if (process.env.MV_TEST_DUMP) console.log('CAM polls', polls, cam.join(' | '))
+    expect(polls, 'the load was observed while in progress').toBeGreaterThan(3)
+    expect(peak, 'frames booting at once').toBeLessThanOrEqual(4)
+    await until(`${ST}.nodes.every((n) => n.status === 'ready')`, 60_000)
+    expect(await ev(`${ST}.nodes.filter((n) => n.readyRetried).length`), 'a queued frame was mistaken for a stalled one').toBe(0)
+    expect(await ev(withSrc)).toBe(12)
+    // the first frames admitted were the ones nearest the viewport centre (the fit view centres the board)
+    const order = JSON.parse(await ev(`JSON.stringify(window.__mvAdmitted)`)) as string[]
+    expect(order, 'admitted in order of distance to the centre: ' + order.join(' ')).toHaveLength(12)
+    // from the second admission on (the first is ranked while the board's fit still settles), frames
+    // went in by distance to the canvas centre, which has not moved since
+    const dist = JSON.parse(await ev(`(() => { const c = document.querySelector('.sh-canvas').getBoundingClientRect(); const st = ${ST}
+      return JSON.stringify(Object.fromEntries([...document.querySelectorAll('.sh-node')].map((el, i) => { const r = el.getBoundingClientRect(); return [st.nodes[i].key, Math.hypot(r.x + r.width / 2 - c.x - c.width / 2, r.y + r.height / 2 - c.y - c.height / 2)] }))) })()`)) as Record<string, number>
+    const seq = order.slice(1).map((k) => dist[k])
+    expect(seq.every((d, i) => i === 0 || d >= seq[i - 1] - 1), 'admitted by distance: ' + order.map((k) => k + ':' + Math.round(dist[k])).join(' ')).toBe(true)
+    await onBoard()
   })
 
   skippable('a board switch unmounts cleanly and the frames sleep again on return', async () => {

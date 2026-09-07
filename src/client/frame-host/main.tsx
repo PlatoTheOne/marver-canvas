@@ -3,7 +3,7 @@
  * Boot failures (theme, providers, layouts, the frame itself) render a plain-DOM error card
  * and post sh:error; an ErrorBoundary catches render-time throws the same way.
  */
-import { Component, createElement, type ReactNode } from 'react'
+import { Component, createElement, useLayoutEffect, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import './bridge.js'
@@ -53,9 +53,18 @@ class Boundary extends Component<{ children: ReactNode }, { err: Error | null }>
   }
 }
 
+/** Posts sh:ready once the scene has COMMITTED (render() only schedules; a layout effect on the
+ *  outermost element runs after every child's, before the first paint of the tree). */
+function Committed({ onCommit, children }: { onCommit: () => void; children?: ReactNode }) {
+  useLayoutEffect(onCommit, [])
+  return children
+}
+
 async function boot() {
+  const phases: Record<string, number> = { boot: Math.round(performance.now()) }   // ms since navigation: where a boot spends its time (research/hifi/bootscale.ts)
   try {
     await import('virtual:sh-theme' as string)
+    phases.theme = Math.round(performance.now())
 
     const fileKey = frameFile(id)
     // Honest copy: the id usually IS valid on disk - this document's frame registry is
@@ -63,6 +72,7 @@ async function boot() {
     if (!fileKey) return fail(`frame "${id}" is not in this canvas's registry yet - the file was likely just added or renamed. The canvas should recover on its own; if this card persists, reload it.`)
 
     const frameMod: any = await frames[fileKey]()
+    phases.scene = Math.round(performance.now())
     const Frame = frameMod.default
     // No typeof gate: memo()/forwardRef() components are objects, not functions.
     // React + the ErrorBoundary validate the element type better than we can.
@@ -73,14 +83,15 @@ async function boot() {
     if (providerKey) wrappers.push((await providers[providerKey]() as any).default)
     for (const lk of layoutChain(fileKey)) wrappers.push((await layouts[lk]() as any).default)
 
+    phases.wrappers = Math.round(performance.now())
     let tree: ReactNode = createElement(Frame)
     for (const W of wrappers.reverse()) if (W != null) tree = createElement(W, null, tree)
 
-    createRoot(document.getElementById('root')!).render(createElement(Boundary, null, tree))
-    // stamp the URL revision so the shell can drop a ready queued by a superseded document (one it
-    // auto-renavigated past) - a WindowProxy survives navigation, so a stale ready could otherwise
-    // mark a reloading frame ready. Mirrors the sh:measure generation guard.
-    post({ type: 'sh:ready', id, gen: params.get('r') ?? '', meta: frameMod.meta && typeof frameMod.meta === 'object' ? frameMod.meta : undefined })
+    // sh:ready on the first COMMIT, stamped with the URL revision so the shell can drop a ready queued
+    // by a superseded document (one it auto-renavigated past) - a WindowProxy survives navigation, so
+    // a stale ready could otherwise mark a reloading frame ready. Mirrors the sh:measure generation guard.
+    const ready = () => { phases.commit = Math.round(performance.now()); post({ type: 'sh:ready', id, gen: params.get('r') ?? '', meta: frameMod.meta && typeof frameMod.meta === 'object' ? frameMod.meta : undefined, phases }) }
+    createRoot(document.getElementById('root')!).render(createElement(Boundary, null, createElement(Committed, { onCommit: ready }, tree)))
   } catch (err) {
     fail((err as Error).message)
   }

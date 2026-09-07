@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { cap, frameUrl, useStore, CONFIG, type Node } from '../store.ts'
+import { admit, release } from './admission.ts'
 import { CopyIcon, IntentGlyph, ParallelogramFillIcon, ReloadIcon, SlideFrameIcon, XIcon } from '../icons.tsx'
 import { CommentLayer } from '../Comments.tsx'
 import { useComments } from '../comments-store.ts'
@@ -62,6 +63,22 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
   const initialSrc = useRef<string | null>(null)
   if (frame && initialSrc.current === null) initialSrc.current = frameUrl(frame, node.theme)
   const fileRef = useRef(frame ? `${frame.kind}:${frame.file}` : null)
+
+  // admission (admission.ts): the iframe gets its src when a boot slot is free, nearest the viewport
+  // centre first; the slot goes back when the frame is ready, errored, gone, or its watchdog acts
+  const [admitted, setAdmitted] = useState(false)
+  useEffect(() => {
+    if (!frame || node.missing) return
+    const rank = () => {   // visible first, then by distance to the centre of the canvas (the panel offsets the window's)
+      const r = iframeRef.current?.getBoundingClientRect(), c = document.querySelector('.sh-canvas')?.getBoundingClientRect()
+      if (!r || !c) return Infinity
+      const visible = r.right > c.left && r.left < c.right && r.bottom > c.top && r.top < c.bottom
+      return (visible ? 0 : 1e7) + Math.hypot(r.x + r.width / 2 - c.x - c.width / 2, r.y + r.height / 2 - c.y - c.height / 2)
+    }
+    admit({ key: node.key, rank, start: () => setAdmitted(true) })
+    return () => release(node.key)
+  }, [frame?.id, node.key, node.missing])
+  useEffect(() => { if (node.status !== 'loading') release(node.key) }, [node.status, node.key])
 
   // theme switch without remount: the live iframe flips via message (no navigation); the frame
   // reports sh:theme-applied and only then sleeps again under the new theme (node.themeOn)
@@ -198,14 +215,16 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
   // auto-renavigates ONCE on a fresh rev; a second silence stays 'loading' (never a red error card).
   // node.nav is a dep so a fresh navigation restarts the full budget; readyRetried flips true on the
   // retry and bounds it to exactly one.
+  // The budget counts from ADMISSION (a queued frame is not silent). The retried document keeps its
+  // boot slot - its boot is still running - and gives it back after a second silence.
   useEffect(() => {
-    if (!shouldArmReadyWatch(node, !!frame)) return
-    const t = setTimeout(() => reloadRef.current(true), 10_000)
+    if (!admitted || node.status !== 'loading' || !frame || node.missing) return
+    const t = setTimeout(() => { if (shouldArmReadyWatch(node, true)) reloadRef.current(true); else release(node.key) }, 10_000)
     return () => clearTimeout(t)
     // depend on the frame's stable SIGNATURE, not the manifest object - that object is replaced on
     // every manifest reconcile, so depending on it would reset the budget on unrelated frames during
     // heavy Live Jam churn and starve the retry. kind/file still re-arm on a real file swap.
-  }, [node.status, node.readyRetried, node.nav, node.key, node.missing, frame?.kind, frame?.file])
+  }, [admitted, node.status, node.readyRetried, node.nav, node.key, node.missing, frame?.kind, frame?.file])
 
   const drag = (e: React.PointerEvent, mode: 'move' | 'e' | 's' | 'se') => {
     e.stopPropagation()
@@ -367,7 +386,7 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
         <iframe
           ref={bindIframe}
           className="sh-live"
-          src={initialSrc.current ?? frameUrl(frame, node.theme)}
+          src={admitted ? (initialSrc.current ?? frameUrl(frame, node.theme)) : undefined}
           title={frame.id}
           onLoad={registerWin}
           style={{ width: node.w, height: node.h, display: node.missing || node.status === 'error' ? 'none' : 'block' }}

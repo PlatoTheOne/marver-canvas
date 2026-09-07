@@ -1,0 +1,61 @@
+/**
+ * Frame admission: how many iframes boot at once.
+ *
+ * Every frame on a board is a document booting on the ONE renderer main thread (~400 ms each for a
+ * lo-fi React frame), and a batch that starts together finishes together: 64 started at once, the
+ * first is ready at 25.6 s and the last at 26.0 s - the board is blank until the end. Admitted a few
+ * at a time, the first is ready at 1.8 s and the board fills in view order for the same total
+ * (research/hifi/bootscale.ts). The ready watchdog counts from admission, not from mount, so a
+ * queued frame is never mistaken for a stalled one.
+ *
+ * A new batch admits ONE frame first (the quickest first content: one boot alone is ~550 ms, four
+ * together ~1.8 s), then up to SLOTS at a time. Pure, apart from its timing: a board that mounts
+ * registers every node, the shell fits the camera (App.tsx, a few tens of ms later), then the first
+ * pump ranks them (visible first, nearest the centre of the canvas first); a freed slot pumps on
+ * the next microtask, ranking again by the view of that moment.
+ */
+export const SLOTS = 4
+let primed = false   // a frame of this batch has finished booting: the batch may use every slot
+
+export interface Admission { key: string; rank: () => number; start: () => void }
+
+const waiting = new Map<string, Admission>()
+const active = new Set<string>()
+let scheduled = false
+
+/** Ask for a slot. Starts once the view has settled (SETTLE ms) when one is free; else queued by rank. */
+export function admit(a: Admission): void {
+  if (active.has(a.key)) return
+  if (!waiting.size && !active.size) primed = false   // a new batch
+  waiting.set(a.key, a)
+  schedule(SETTLE)
+}
+const SETTLE = 350   // the board fit animates ~250 ms from 60 ms after mount: rank the first pick on the settled view
+
+/** The frame is done booting (ready, error, gone, or its watchdog took over): free the slot, or
+ *  leave the queue if it never started. */
+export function release(key: string): void {
+  waiting.delete(key)
+  if (active.delete(key)) { primed = true; schedule(0) }
+}
+
+function schedule(ms: number): void {
+  if (scheduled) return
+  scheduled = true
+  if (ms) setTimeout(pump, ms); else queueMicrotask(pump)
+}
+
+function pump(): void {
+  scheduled = false
+  while (active.size < (primed ? SLOTS : 1) && waiting.size) {
+    let best: Admission | undefined, bestRank = Infinity
+    for (const a of waiting.values()) { const r = a.rank(); if (r < bestRank || !best) { best = a; bestRank = r } }
+    waiting.delete(best!.key)
+    active.add(best!.key)
+    ;(globalThis as { __mvAdmitted?: string[] }).__mvAdmitted?.push(best!.key)   // diagnostic: the order, when a probe asks for it
+    best!.start()
+  }
+}
+
+/** For tests: nothing queued, nothing active. */
+export function resetAdmission(): void { waiting.clear(); active.clear(); primed = false }
