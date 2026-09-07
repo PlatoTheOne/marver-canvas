@@ -19,7 +19,7 @@ import type { Plugin } from 'vite'
  *  first, so a brace or a declaration inside one is content, not syntax; values come from the
  *  original text. */
 export function keepBackdropFilter(css: string): string {
-  const masked = css.replace(/\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, (m) => ' '.repeat(m.length))
+  const masked = maskCustomProperties(css.replace(/\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, (m) => ' '.repeat(m.length)))
   const PREFIXED = /(^|[^-\w])-webkit-backdrop-filter\s*:/gi   // a candidate; the declaration split below decides
   const seen = new Set<number>()
   const edits: { at: number; text: string }[] = []
@@ -50,7 +50,7 @@ export function keepBackdropFilter(css: string): string {
     let paren = 0, from = 0
     for (let i = 0; i <= list.length; i++) {
       const c = list[i]
-      if (c === '(') paren++; else if (c === ')') paren = Math.max(0, paren - 1)
+      if (c === '(' || c === '[') paren++; else if (c === ')' || c === ']') paren = Math.max(0, paren - 1)
       if (i === list.length || (c === ';' && paren === 0)) {
         const text = list.slice(from, i), colon = text.indexOf(':')
         if (colon > 0) decls.push({ prop: text.slice(0, colon).trim().toLowerCase(), valueAt: from + colon + 1, end: i })
@@ -67,6 +67,25 @@ export function keepBackdropFilter(css: string): string {
   let out = css
   for (const e of edits.sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.text + out.slice(e.at)
   return out
+}
+
+/** A custom property's value may hold anything, braces, brackets and semicolons included (CSS
+ *  Variables 1): blanked, same length, so no brace or property name inside one reads as syntax. */
+function maskCustomProperties(masked: string): string {
+  const out = masked.split('')
+  const re = /(^|[;{\s])--[\w-]+\s*:/g
+  for (const m of masked.matchAll(re)) {
+    let depth = 0, i = m.index! + m[0].length
+    for (; i < masked.length; i++) {
+      const c = masked[i]
+      if (c === '(' || c === '[' || c === '{') depth++
+      else if (c === ')' || c === ']' || c === '}') { if (depth === 0) break; depth-- }
+      else if (c === ';' && depth === 0) break
+      out[i] = ' '
+    }
+    re.lastIndex = i
+  }
+  return out.join('')
 }
 
 export function cssFixPlugin(): Plugin {

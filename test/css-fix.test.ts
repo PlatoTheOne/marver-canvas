@@ -47,4 +47,9 @@ describe('keepBackdropFilter', () => {
     expect(keepBackdropFilter('.b{--x:-webkit-backdrop-filter:blur(9px);color:red}')).toBe('.b{--x:-webkit-backdrop-filter:blur(9px);color:red}')
     expect(keepBackdropFilter('.c{-webkit-backdrop-filter:url(#a;b);color:red}')).toBe('.c{-webkit-backdrop-filter:url(#a;b);backdrop-filter:url(#a;b);color:red}')
   })
+  it('a custom property\'s value may hold braces, brackets and semicolons: never syntax', () => {
+    expect(keepBackdropFilter('.a{--x:{-webkit-backdrop-filter:blur(9px)}}')).toBe('.a{--x:{-webkit-backdrop-filter:blur(9px)}}')
+    expect(keepBackdropFilter('.a{--x:[x;backdrop-filter:none];-webkit-backdrop-filter:blur(2px)}')).toBe('.a{--x:[x;backdrop-filter:none];-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}')
+    expect(keepBackdropFilter('.a{--x:{a:b};.b{-webkit-backdrop-filter:blur(1px)}}')).toBe('.a{--x:{a:b};.b{-webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px)}}')
+  })
 })
