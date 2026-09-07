@@ -132,6 +132,8 @@ export async function sleep(nodeKey: string, iframe: HTMLIFrameElement, key: Sle
   const decoded = await Promise.all(targets.map((t) => { const im = new Image(); im.src = t.texture; return im.decode().then(() => true, () => false) }))
   if (!current()) return 'live'
   if (decoded.some((ok) => !ok)) targets = []
+  // a published document names the generation it was built with: textures dress that build only
+  if (PUBLISHED && targets.length && doc.querySelector('meta[name="mv-bakes"]')?.getAttribute('content') !== String(BAKES)) targets = []
   if (!install(doc, targets)) return 'live'
   // a certified sleep is remembered; the pause-only fallback is not, so the next lifecycle event
   // asks again (a compile the source outran, a server hiccup), and one retry is scheduled now

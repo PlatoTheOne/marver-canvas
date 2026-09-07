@@ -5,7 +5,7 @@ import { keepBackdropFilter } from '../src/server/css-fix.ts'
 // Chromium then computes backdrop-filter: none - the standard declaration goes back beside it.
 
 describe('keepBackdropFilter', () => {
-  it('adds the standard declaration where a block has only the prefixed one', () => {
+  it('adds the standard declaration where a block has only the prefixed one, keeping the text as it was', () => {
     expect(keepBackdropFilter('.glass {\n  -webkit-backdrop-filter: blur(28px) saturate(1.2) brightness(.55);\n  border: 1px solid red;\n}'))
       .toBe('.glass {\n  -webkit-backdrop-filter: blur(28px) saturate(1.2) brightness(.55);backdrop-filter:blur(28px) saturate(1.2) brightness(.55);\n  border: 1px solid red;\n}')
   })
@@ -13,7 +13,16 @@ describe('keepBackdropFilter', () => {
     const both = '.a{backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}.b{-webkit-backdrop-filter:blur(2px);color:red;backdrop-filter:blur(2px)}.c{color:blue}'
     expect(keepBackdropFilter(both)).toBe(both)
   })
-  it('a var() value and a minified last declaration', () => {
+  it('a var() value, !important, uppercase, and a minified last declaration', () => {
     expect(keepBackdropFilter('.x{-webkit-backdrop-filter:var(--blur)}')).toBe('.x{-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}')
+    expect(keepBackdropFilter('.y{-WEBKIT-BACKDROP-FILTER: blur(1px) !important;}')).toBe('.y{-WEBKIT-BACKDROP-FILTER: blur(1px) !important;backdrop-filter:blur(1px) !important;}')
+  })
+  it('strings and comments are content: a brace or a declaration inside one is not syntax', () => {
+    const css = '.q::after{content:"}";-webkit-backdrop-filter:blur(3px)}.r{content:"backdrop-filter:blur(9px)";-webkit-backdrop-filter:blur(5px)}.s{/* backdrop-filter: nope */-webkit-backdrop-filter:blur(7px)}'
+    expect(keepBackdropFilter(css)).toBe('.q::after{content:"}";-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}.r{content:"backdrop-filter:blur(9px)";-webkit-backdrop-filter:blur(5px);backdrop-filter:blur(5px)}.s{/* backdrop-filter: nope */-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px)}')
+  })
+  it('an at-rule condition is not a declaration: nested @media and @supports blocks are read innermost', () => {
+    const css = '@media (min-width: 1px) {\n  @supports (backdrop-filter: blur(1px)) {\n    .a { -webkit-backdrop-filter: blur(2px); }\n  }\n}'
+    expect(keepBackdropFilter(css)).toBe('@media (min-width: 1px) {\n  @supports (backdrop-filter: blur(1px)) {\n    .a { -webkit-backdrop-filter: blur(2px);backdrop-filter:blur(2px); }\n  }\n}')
   })
 })

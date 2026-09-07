@@ -12,29 +12,44 @@
  * pause alone, glass live, as today. No Chrome on the build machine: the note is printed and the
  * site ships without textures.
  */
-import { copyFileSync, existsSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
+import { copyFileSync, lstatSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { ASK_MAX, bakeBatch, type BakeAnswer, type BakeAsk } from './bake.ts'
 import { findChrome } from './cdp.ts'
 import { MIME } from './serve.ts'
+import { planShot } from './shot.ts'
 
 export interface PublishedIndex { gen: number; answers: Record<string, { ok: true; targets: NonNullable<Extract<BakeAnswer, { ok: true }>['targets']> }> }
 
 /** The shell's plain key for an ask (sleep.ts keyOf): frame|theme|w|h. */
 export const indexKey = (a: BakeAsk) => `${a.frame}|${a.theme}|${Math.round(a.w)}|${Math.round(a.h)}`
 
-/** Every (frame, theme, size) a visitor can rest on: each published board's nodes, each theme, within
- *  the compiler's limits (an oversize node is skipped, never clamped to a document of another size). */
-export function publishedAsks(boards: Record<string, { nodes?: { frame?: string; w?: number; h?: number }[] }>, themes: string[]): BakeAsk[] {
+export interface PublishedFrame { id: string; kind: 'tsx' | 'html'; file: string; viewport?: string; contentWidth?: number; slide?: boolean }
+type Node = { frame?: string; w?: number; h?: number }
+
+/** Every (frame, theme, size) a visitor can rest on: each published board's nodes, sized the way
+ *  the shell sizes them (the node's own size, else the frame's default), each theme; the published
+ *  `all-scenes` board shows every frame at its default size. Sizes are rounded first, then held to
+ *  the compiler's limits: an oversize node is skipped, never clamped to a document of another size. */
+export function publishedAsks(boards: Record<string, { nodes?: Node[] }>, themes: string[], frames: PublishedFrame[], viewports: Record<string, { width: number; height: number }>, allScenes = false): BakeAsk[] {
+  const byId = new Map(frames.map((f) => [f.id, f]))
   const seen = new Map<string, BakeAsk>()
-  for (const b of Object.values(boards)) for (const n of b?.nodes ?? []) {
-    if (typeof n?.frame !== 'string' || !(n.w! >= 120) || !(n.h! >= 80) || n.w! > ASK_MAX.side || n.h! > ASK_MAX.side || n.w! * n.h! > ASK_MAX.area) continue
-    for (const theme of themes.length ? themes : ['light']) {
-      const ask = { frame: n.frame, theme, w: Math.round(n.w!), h: Math.round(n.h!) }
-      seen.set(indexKey(ask), ask)
-    }
+  const add = (frame: string, w: number, h: number) => {
+    w = Math.round(w); h = Math.round(h)
+    if (!(w >= 120) || !(h >= 80) || w > ASK_MAX.side || h > ASK_MAX.side || w * h > ASK_MAX.area) return
+    for (const theme of themes.length ? themes : ['light']) { const ask = { frame, theme, w, h }; seen.set(indexKey(ask), ask) }
   }
+  const size = (f: PublishedFrame, n?: Node) => {
+    if (n && typeof n.w === 'number' && typeof n.h === 'number' && n.w > 0 && n.h > 0) return { w: n.w, h: n.h }
+    const p = planShot(f, viewports, {})
+    return { w: p.width, h: p.initialHeight }
+  }
+  for (const b of Object.values(boards)) for (const n of b?.nodes ?? []) {
+    const f = typeof n?.frame === 'string' ? byId.get(n.frame) : undefined
+    if (f) { const { w, h } = size(f, n); add(f.id, w, h) }
+  }
+  if (allScenes) for (const f of frames) { const { w, h } = size(f); add(f.id, w, h) }
   return [...seen.values()]
 }
 
@@ -69,43 +84,56 @@ export interface PublishedBakes { asked: number; asleep: number; live: number; p
 
 /** Compile the published boards' frames against the built site and ship the textures with it.
  *  Returns null when there is no Chrome to compile with. */
-export async function bakePublished(opts: { root: string; outDir: string; gen: number; boards: Record<string, { nodes?: { frame?: string; w?: number; h?: number }[] }>; themes: string[]; urlFor: (frame: string, theme: string) => string | null; log?: (line: string) => void }): Promise<PublishedBakes | null> {
-  const { root, outDir, gen, boards, themes, urlFor, log } = opts
+export async function bakePublished(opts: {
+  root: string; outDir: string; gen: number
+  boards: Record<string, { nodes?: Node[] }>; themes: string[]; frames: PublishedFrame[]; viewports: Record<string, { width: number; height: number }>; allScenes?: boolean
+  urlFor: (frame: string, theme: string) => string | null; log?: (line: string) => void
+}): Promise<PublishedBakes | null> {
+  const { root, outDir, gen, boards, themes, frames, viewports, allScenes, urlFor, log } = opts
   if (!findChrome()) return null
   const t0 = Date.now()
-  const asks = publishedAsks(boards, themes).filter((a) => urlFor(a.frame, a.theme))   // only frames the bundle carries
+  const asks = publishedAsks(boards, themes, frames, viewports, allScenes).filter((a) => urlFor(a.frame, a.theme))
   const stats: PublishedBakes = { asked: asks.length, asleep: 0, live: 0, plain: 0, bytes: 0, ms: 0 }
   if (!asks.length) return stats
+  const cache = join(root, 'design', '.local', 'bakes', String(gen))
   const site = await serveDir(outDir)
   let answers: BakeAnswer[]
   try {
-    answers = await bakeBatch({
-      root, gen, asks, urlBase: '/__mv/bakes',
-      urlFor: (a) => site.origin + urlFor(a.frame, a.theme)!,
-      log: (a) => {
-        if (!a.ok) { stats.live++; log?.(`  bake: ${a.frame} ${a.theme} ${a.w}x${a.h} - stays live: ${a.error}`); return }
-        if (!a.targets.length) { stats.plain++; return }
-        const shipped = a.targets.filter((t) => t.verified).length
-        if (shipped) stats.asleep++; else stats.live++
-        log?.(`  bake: ${a.frame} ${a.theme} ${a.w}x${a.h} - ${a.targets.length} effects, ${a.rejected} stay live, ${a.ms} ms`)
-      },
-    })
-  } finally { site.close() }
-  // ship the certified PNGs and one index, nothing else (no bake.json, no owner, no refused target);
-  // the index is written last, so a reader never sees it before its textures
-  const index = publishedIndex(gen, answers)
-  const to = join(outDir, '__mv', 'bakes')
-  rmSync(to, { recursive: true, force: true })
-  for (const a of Object.values(index.answers)) for (const t of a.targets) {
-    const from = join(root, 'design', '.local', 'bakes', t.texture.replace(/^\/__mv\/bakes\//, ''))
-    const dest = join(outDir, t.texture.slice(1))
-    if (!existsSync(from)) continue
-    mkdirSync(join(dest, '..'), { recursive: true })
-    copyFileSync(from, dest)
-    stats.bytes += statSync(dest).size
+    answers = await bakeBatch({ root, gen, asks, urlBase: '/__mv/bakes', urlFor: (a) => site.origin + urlFor(a.frame, a.theme)! })
+    // ship the certified PNGs and one index, nothing else (no bake.json, no owner, no refused target);
+    // a texture that is not a regular file of THIS generation's cache drops its whole answer; the
+    // index is written last, so a reader never sees it before its textures
+    const index = publishedIndex(gen, answers)
+    const to = join(outDir, '__mv', 'bakes')
+    rmSync(to, { recursive: true, force: true })
+    const grammar = new RegExp(`^/__mv/bakes/${gen}/[0-9a-f]{16}/\\d+\\.png$`)
+    const realCache = (() => { try { return realpathSync(cache) } catch { return null } })()
+    for (const [key, a] of Object.entries(index.answers)) {
+      const files: [string, string][] = []
+      const ok = realCache !== null && a.targets.every((t) => {
+        if (!grammar.test(t.texture)) return false
+        const from = join(root, 'design', '.local', 'bakes', t.texture.replace(/^\/__mv\/bakes\//, ''))
+        try { if (!lstatSync(from).isFile()) return false; if (!realpathSync(from).startsWith(realCache + '/')) return false } catch { return false }
+        files.push([from, join(outDir, t.texture.slice(1))])
+        return true
+      })
+      if (!ok) { delete index.answers[key]; continue }
+      for (const [from, dest] of files) { mkdirSync(join(dest, '..'), { recursive: true }); copyFileSync(from, dest); stats.bytes += statSync(dest).size }
+    }
+    mkdirSync(join(to, String(gen)), { recursive: true })
+    writeFileSync(join(to, String(gen), 'index.json'), JSON.stringify(index))
+    // the totals come from the answers and the index, not from what happened to be logged
+    for (const a of answers) {
+      if (!a.ok) { stats.live++; log?.(`  bake: ${a.frame} ${a.theme} ${a.w}x${a.h} - stays live: ${a.error}`); continue }
+      if (!a.targets.length) { stats.plain++; continue }
+      const shipped = index.answers[indexKey(a)]?.targets.length ?? 0
+      if (shipped) stats.asleep++; else stats.live++
+      log?.(`  bake: ${a.frame} ${a.theme} ${a.w}x${a.h} - ${a.targets.length} effects, ${a.targets.length - shipped} stay live, ${a.ms} ms`)
+    }
+  } finally {
+    site.close()
+    rmSync(cache, { recursive: true, force: true })   // this build's generation only; another server's cache is its own
   }
-  mkdirSync(join(to, String(gen)), { recursive: true })
-  writeFileSync(join(to, String(gen), 'index.json'), JSON.stringify(index))
   stats.ms = Date.now() - t0
   return stats
 }

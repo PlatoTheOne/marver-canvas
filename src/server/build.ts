@@ -522,6 +522,9 @@ export async function buildSite(root: string, boardsFlag?: string, allBoardsFlag
     const html = readFileSync(join(clientDir, srcDir, 'index.html'), 'utf8')
       .replaceAll('{{ROUTE}}', ROUTE)
       .replace('<script type="module" src="{{ENTRY}}"></script>', `${links}\n    <script type="module" src="/${entry.fileName}"></script>`)
+      // the frame document names the textures' generation it was published with: the shell installs
+      // textures on a document of the same build only (an old shell must not dress a republished frame)
+      .replace(/<head([^>]*)>/, (m) => entryName === 'frame' && bakeGen ? `${m}\n    <meta name="mv-bakes" content="${bakeGen}">` : m)
     mkdirSync(dirname(join(outDir, outPath)), { recursive: true })
     writeFileSync(join(outDir, outPath), html)
   }
@@ -655,6 +658,7 @@ export async function buildSite(root: string, boardsFlag?: string, allBoardsFlag
     const pubFrameFile = new Map(pubFrames.map((f) => [f.id, f]))
     const r = await bakePublished({
       root, outDir, gen: bakeGen, boards, themes: config.themes, log: (l) => console.log(l),
+      frames: pubFrames, viewports: config.viewports, allScenes: includeAll,
       // the frame's PUBLISHED url (an html frame's opaque path when the source is stripped)
       urlFor: (id, theme) => { const f = pubFrameFile.get(id); if (!f) return null; return f.kind === 'html' ? `/${f.file}?theme=${encodeURIComponent(theme)}&r=${bakeGen}` : `/__mv/frame/?id=${encodeURIComponent(id)}&theme=${encodeURIComponent(theme)}&r=${bakeGen}` },
     })

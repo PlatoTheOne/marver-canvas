@@ -32,7 +32,7 @@ export default () => (
       [data-theme="dark"] main { background: linear-gradient(135deg, #1b1f3a 0%, #3a1b4d 50%, #0d3b3b 100%) }
       [data-theme="dark"] .g { background: rgba(0,0,0,.35); color: #eee; border-color: rgba(255,255,255,.2) }
     \`}</style>
-    <div className="g" style={{ left: 40, top: 40, width: 300 }}>Past due</div>
+    <div className="g glass" style={{ left: 40, top: 40, width: 300 }}>Past due</div>
     <div className="g" style={{ left: 40, top: 160, width: 420 }}>Lane first</div>
     <div className="g" style={{ left: 380, top: 90, width: 260 }}>Chase dispatch</div>
     <div className="g" style={{ left: 60, top: 380, width: 300, mixBlendMode: 'multiply' }}>Blended: stays live</div>
@@ -56,6 +56,9 @@ beforeAll(async () => {
   mkdirSync(scenes, { recursive: true })
   writeFileSync(join(scenes, 'glass.tsx'), GLASS)
   writeFileSync(join(scenes, 'plain.tsx'), PLAIN)
+  // the host stylesheet declares both forms, the way shadcn/Tailwind projects do: the published
+  // stylesheet must keep the standard one (css-fix.ts) - this rule wins over the inline .g one
+  writeFileSync(join(root, 'design', 'theme.css'), `.g.glass { backdrop-filter: blur(6px) saturate(1.3); -webkit-backdrop-filter: blur(6px) saturate(1.3); }\n`)
   const boards = join(root, 'design', 'boards')
   mkdirSync(boards, { recursive: true })
   writeFileSync(join(boards, 'main.json'), JSON.stringify({ version: 1, name: 'main', order: 0, auto: false, nodes: [
@@ -137,12 +140,23 @@ describe('textures at publish time, in a real published browser', () => {
     const shipped = readdirSync(join(bakes, gens[0]), { recursive: true }) as string[]
     expect(shipped.filter((f) => !f.endsWith('.png') && !f.endsWith('index.json') && f.includes('.')), 'only textures and the index ship').toEqual([])
     expect(shipped.filter((f) => f.endsWith('.png'))).toHaveLength(6)
+    expect(existsSync(join(root, 'design', '.local', 'bakes', gens[0])), 'the build cleans its own cache generation').toBe(false)
+    // the published stylesheet kept its glass: both declarations, in the extracted asset
+    const css = readdirSync(join(root, 'design', '.dist', 'assets')).filter((f) => f.endsWith('.css')).map((f) => readFileSync(join(root, 'design', '.dist', 'assets', f), 'utf8')).join('\n')
+    expect(css).toMatch(/-webkit-backdrop-filter:\s*blur\(6px\) saturate\(1\.3\)/)
+    expect(css).toMatch(/(^|[^-])backdrop-filter:\s*blur\(6px\) saturate\(1\.3\)/)
+    // and the frame document names the generation it was built with
+    const frameHtml = readFileSync(join(root, 'design', '.dist', '__mv', 'frame', 'index.html'), 'utf8')
+    expect(frameHtml).toContain(`<meta name="mv-bakes" content="${gens[0]}">`)
   })
   skippable('the published frame sleeps under its three textures, its blended glass live; ?awake=1 keeps everything live', async () => {
     await open()
     expect(await ev(ASLEEP)).toBe(true)
     expect(await ev(TEXTURES)).toBe(3)
     expect(await ev(LIVE_FILTERS)).toBe(1)
+    // the host stylesheet's glass rule applies in the published frame (its standard declaration survived the build)
+    await open('?awake=1')
+    expect(await ev(`getComputedStyle(${DOC}.querySelector('.glass')).backdropFilter`)).toBe('blur(6px) saturate(1.3)')
     await open('?awake=1')
     expect(await ev(TEXTURES)).toBe(0)
     expect(await ev(LIVE_FILTERS)).toBe(4)
