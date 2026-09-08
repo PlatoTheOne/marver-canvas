@@ -95,10 +95,30 @@ function sketchShapes(svg: SVGSVGElement, rough: any) {
   const skip = (el: Element) =>
     (el as any).__sketched
     || !!el.closest('.label, foreignObject, marker, defs, .face, .legend-text')
-    || !!el.parentElement?.closest('g.node, g.rough-node, g.cluster')   // the unified renderer's nodes: mermaid sketched these itself
+    || sketchedByMermaid(el)
     || (el.nextElementSibling?.tagName === 'g' && !!el.nextElementSibling.querySelector('path'))   // mermaid's own rough
     || !visible(el)
+  // the unified renderer's nodes carry `g.node` / `g.rough-node`, but the class is a promise, not
+  // a fact: a mindmap node wears `rough-node` around a plain path. Trust the evidence - rough
+  // output is classless paths, direct or inside the label container
+  const sketchedByMermaid = (el: Element) => {
+    const node = el.parentElement?.closest('g.node, g.rough-node, g.cluster')
+    if (!node) return false
+    const plain = (e: Element) => !(e.getAttribute('class') ?? '').trim()   // an EMPTY class attribute is no class
+    for (const c of node.children) {
+      if (c.tagName === 'path' && plain(c)) return true
+      if (c.tagName === 'g' && (plain(c) || /\b(basic|label-container)\b/.test(c.getAttribute('class') ?? '')) && [...c.children].some((cc) => cc.tagName === 'path' && plain(cc))) return true
+    }
+    return false
+  }
   const place = (el: Element, g: SVGGElement, backing: string) => {
+    // rough draws with presentation attributes; inside a mermaid node group the diagram's own
+    // stylesheet (`.node path { fill; stroke }`) would beat them - pin them as inline styles
+    for (const path of g.querySelectorAll('path')) {
+      path.style.fill = path.getAttribute('fill') ?? 'none'
+      path.style.stroke = path.getAttribute('stroke') ?? 'none'
+      path.style.strokeWidth = path.getAttribute('stroke-width') ?? '1'
+    }
     el.setAttribute('style', `fill: ${backing}; stroke: none;`)
     ;(el as any).__sketched = true
     el.after(g)
@@ -188,6 +208,10 @@ async function renderDiagrams(body: HTMLElement, alive: () => boolean) {
       if (!alive()) return
       host.innerHTML = sanitizeSvg(svg)
       const el = host.querySelector('svg')
+      // never larger than drawn: a family without mermaid's max-width (block) would upscale to
+      // the note's width and its hatching with it - the viewBox width is the ceiling
+      const vb = el?.viewBox?.baseVal
+      if (el && vb && vb.width > 0 && !el.style.maxWidth) el.style.maxWidth = `${Math.ceil(vb.width)}px`
       pre.replaceWith(host)
       if (el) { sketchShapes(el, rough); inkPalette(el) }   // computed colours need the svg in the document
     } catch (e) {
