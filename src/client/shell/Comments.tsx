@@ -278,7 +278,10 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
           return r.left < rx + W && r.right > rx && r.top < rect.bottom && r.bottom > rect.top
         })
       }
-      const room = (s: 'l' | 'r') => (s === 'r' ? window.innerWidth - rect.right : rect.left - gutter) >= W + GAP
+      // the left room starts at the sidebar's edge, not the window's: a card parked under the
+      // panel is a card nobody can read (a note's gutter makes that reach likelier)
+      const panelRight = document.querySelector('.sh-panel:not(.closed)')?.getBoundingClientRect().right ?? 0
+      const room = (s: 'l' | 'r') => (s === 'r' ? window.innerWidth - rect.right : rect.left - gutter - panelRight) >= W + GAP
       const prefer: ('l' | 'r')[] = pinPos(activeThread2).x < node.w / 2 ? ['l', 'r'] : ['r', 'l']
       return prefer.find((s) => room(s) && !occupied(s)) ?? prefer.find(room) ?? prefer[0]
     }

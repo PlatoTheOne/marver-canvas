@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Browser } from './browser.ts'
@@ -288,4 +288,55 @@ describe('sticky notes on the canvas', () => {
       expect(state).toEqual({ src: '/design/assets/flow.png', h2: 'Why the list leads now', scene: 'App' })
     } finally { try { served.kill('SIGTERM') } catch { /* gone */ } }
   }, 120_000)
+
+  it('a reviewer on a GATED published canvas comments on a note: invite claimed, thread created, pin on the note after reload', async () => {
+    if (!browser) return
+    // the site built by the previous test (design/.dist); served gated with a data dir, like a deploy
+    const port = PORT + 2, base = `http://localhost:${port}`
+    const dataDir = mkdtempSync(join(tmpdir(), 'mv-notes-data-'))
+    let slog = ''
+    const served = spawn(process.execPath, [CLI, 'serve'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PORT: String(port), MARVER_PASSWORD: 'hunter2', MARVER_DATA_DIR: dataDir, MARVER_OWNER_EMAIL: 'owner@x.test', MARVER_ID_ISSUER: '' } })
+    served.stdout?.on('data', (d) => { slog += d }); served.stderr?.on('data', (d) => { slog += d })
+    try {
+      const t0 = Date.now()
+      while (Date.now() - t0 < 30_000) { if (await fetch(base).then((r) => r.ok || r.status === 401 || r.status === 403, () => false)) break; await wait(200) }
+      await wait(500)
+      const token = /\/#\/i\/([\w-]+)/.exec(slog)?.[1] ?? ''
+      expect(token, 'the owner bootstrap link in the serve log').not.toBe('')
+      const s = await browser.tab({ width: 1500, height: 950 })
+      await browser.go(s, `${base}/#/i/${token}`)
+      await browser.until(s, `!!document.querySelector('input[type=password]')`, 20_000)
+      await browser.eval(s, `(() => { const i = document.querySelector('input[type=password]'); i.value = 'hunter2'; i.form.submit() })()`)
+      // the claim dialog: a password of one's own, a name, join
+      await browser.until(s, `!!document.querySelector('input[type=password]') && !document.querySelector('input[type=password]').form`, 20_000)
+      await browser.eval(s, `document.querySelector('input[type=password]').focus()`)
+      await browser.send('Input.insertText', { text: 'reviewer-pass-1' }, s)
+      await browser.eval(s, `(() => { const is = [...document.querySelectorAll('input:not([type=password]):not([type=hidden]):not([type=file])')]; (is.find((x) => /name/i.test(x.placeholder + x.name)) ?? is[is.length - 1]).focus() })()`)
+      await browser.send('Input.insertText', { text: 'Reviewer Rae' }, s)
+      await wait(200)
+      await click(browser, s, await browser.eval(s, `(() => { const b = [...document.querySelectorAll('button')].find((x) => /join/i.test(x.textContent)); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()`))
+      await browser.until(s, `!document.querySelector('input[type=password]')`, 15_000)
+      // the board, the note, a comment on its paragraph
+      await browser.go(s, `${base}/#/b/notes?n=n-home`)
+      await browser.until(s, `document.querySelectorAll('[data-node="n-home"] .sh-notes .sh-sticky').length === 2 && !!document.querySelector('[data-node="n-home"] .sh-sticky-diagram svg')`, 30_000)
+      await wait(600)
+      await browser.press(s, 'c'); await wait(200)
+      await click(browser, s, await centre(browser, s, '[data-node="n-home"] [data-sticky="frame"] .sh-sticky-body p'))
+      await browser.until(s, `!!document.querySelector('[data-node="n-home"] .cm-draft')`, 10_000)
+      await browser.send('Input.insertText', { text: 'Reviewer: is the list really first?' }, s)
+      await wait(200)
+      await click(browser, s, await centre(browser, s, '[data-node="n-home"] .cm-draft button:last-of-type'))
+      await browser.until(s, `!!document.querySelector('[data-node="n-home"] .cm-pin')`, 15_000)
+      expect(existsSync(join(dataDir, 'comments', 'notes.jsonl')), 'the thread reached the data dir').toBe(true)
+      // reload: persisted, and pinned on the note's paragraph, not on the frame
+      await browser.go(s, `${base}/#/b/notes?n=n-home`)
+      await browser.until(s, `!!document.querySelector('[data-node="n-home"] .sh-sticky-diagram svg')`, 30_000)
+      await wait(500)
+      await click(browser, s, await centre(browser, s, '[data-node="n-home"] .sh-node-head'))
+      await browser.until(s, `!!document.querySelector('[data-node="n-home"] .cm-pin')`, 15_000)
+      const pinned = await browser.eval(s, `(() => { const pin = document.querySelector('[data-node="n-home"] .cm-pin'); const r = pin.getBoundingClientRect(); const p = document.querySelector('[data-node="n-home"] [data-sticky="frame"] .sh-sticky-body p').getBoundingClientRect(); return { left: parseFloat(pin.style.left), onNote: r.left >= p.left - 6 && r.left <= p.right + 6 && r.bottom >= p.top - 6 && r.bottom <= p.bottom + 40 } })()`)
+      expect(pinned.left).toBeLessThan(0)
+      expect(pinned.onNote).toBe(true)
+    } finally { try { served.kill('SIGTERM') } catch { /* gone */ } rmSync(dataDir, { recursive: true, force: true }) }
+  }, 180_000)
 })
