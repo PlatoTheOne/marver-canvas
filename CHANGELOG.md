@@ -15,7 +15,9 @@ Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](ht
   notes. Every viewer folds a note at its corner and hides all with `N`; the choice stays in the
   browser, never in the board file. Published and shared canvases carry the notes, their images
   copied like any Md image. An edit to a note file updates the sticky in place; the frame is never
-  reloaded.
+  reloaded. Every diagram family wears the note's look - flowchart, sequence, state, class, ER,
+  pie, mindmap, timeline, gantt, journey, quadrant, git graph, block: hand-sketched boxes, one
+  yellow palette, handwriting labels (the Diagram block in content frames keeps its own theme).
 
 ### Changed
 

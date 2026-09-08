@@ -246,6 +246,27 @@ describe('sticky notes on the canvas', () => {
     await browser.until(s, `document.querySelectorAll('[data-node="n-next"] .sh-notes').length === 0`, 15_000)
   })
 
+  it('every diagram family renders in a note without error, in one look (sketched boxes on non-flowchart types)', async () => {
+    if (!browser) return
+    const s = await open(browser)
+    const gallery = ['sequenceDiagram\n  A->>B: hi\n  Note over A,B: n', 'stateDiagram-v2\n  [*] --> A\n  A --> B', 'classDiagram\n  class A {\n    +x\n  }\n  A --> B', 'erDiagram\n  A ||--o{ B : has', 'pie\n  "a" : 1\n  "b" : 2', 'mindmap\n  root((r))\n    a\n    b', 'gantt\n  dateFormat HH:mm\n  section S\n    t :a1, 06:00, 20m', 'journey\n  section S\n    t: 3: Me', 'timeline\n  title T\n  Day 0 : a : b', 'quadrantChart\n  x-axis L --> R\n  y-axis B --> T\n  P: [0.5, 0.5]', 'gitGraph\n  commit\n  branch b\n  commit', 'flowchart LR\n  A --> B']
+    writeFileSync(join(root, 'design', 'scenes', 'app', 'next.note.md'), gallery.map((d) => '```mermaid\n' + d + '\n```').join('\n\n'))
+    await browser.until(s, `document.querySelectorAll('[data-node="n-next"] .sh-sticky-diagram svg').length + document.querySelectorAll('[data-node="n-next"] pre.err').length === ${gallery.length}`, 40_000)
+    await wait(500)
+    // every shape's COMPUTED colour is on the paper: a yellow (r high, g high, b lower), the ink, or the line
+    const state = await browser.eval(s, `(() => { const b = document.querySelector('[data-node="n-next"] .sh-sticky-body')
+      const onPaper = (c) => { const m = /rgba?\\((\\d+), (\\d+), (\\d+)(?:, ([\\d.]+))?\\)/.exec(c); if (!m) return true; if (m[4] !== undefined && Number(m[4]) === 0) return true; const [r, g, bl] = [m[1], m[2], m[3]].map(Number); return (r >= 200 && g >= 180 && bl <= 230 && bl < g) || (r <= 120 && g <= 100 && bl <= 40) }
+      const off = []
+      for (const el of b.querySelectorAll('svg :is(path, rect, circle, ellipse, polygon, line)')) { const cs = getComputedStyle(el); if (!onPaper(cs.fill)) off.push(['fill', cs.fill, el.getAttribute('class')]); if (!onPaper(cs.stroke)) off.push(['stroke', cs.stroke, el.getAttribute('class')]) }
+      return { errs: [...b.querySelectorAll('pre.err')].map((p) => p.textContent), svgs: b.querySelectorAll('.sh-sticky-diagram svg').length, actorSketched: !!b.querySelector('rect.actor + g path'), off: off.slice(0, 6) } })()`)
+    expect(state.errs).toEqual([])
+    expect(state.svgs).toBe(gallery.length)
+    expect(state.actorSketched).toBe(true)   // the family mermaid leaves plain gets the rough.js boxes
+    expect(state.off).toEqual([])            // nothing off the paper's palette
+    rmSync(join(root, 'design', 'scenes', 'app', 'next.note.md'))
+    await browser.until(s, `document.querySelectorAll('[data-node="n-next"] .sh-notes').length === 0`, 15_000)
+  })
+
   it('a published canvas carries the notes: column, diagram and the note’s image, no dev server', async () => {
     if (!browser) return
     writeFileSync(join(root, 'design', 'scenes', 'app', 'home.note.md'), NOTE.replace('Why the jobs list leads', 'Why the list leads now'))   // order-independent: the text this test expects

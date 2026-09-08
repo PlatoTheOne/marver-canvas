@@ -233,7 +233,7 @@ export async function dev(root: string, portFlag?: number) {
       // node_modules, so non-hoisted pnpm hosts resolve correctly too.
       include: [
         'react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime',
-        `${PKG} > marked`, `${PKG} > mermaid`, `${PKG} > html-to-image`,
+        `${PKG} > marked`, `${PKG} > mermaid`, `${PKG} > roughjs`, `${PKG} > html-to-image`,
         ...iconModules(root),   // the per-icon modules the design imports (icons.ts), bundled up front
       ],
       entries: [join(clientDir, 'frame-host', 'index.html'), 'design/**/*.{tsx,jsx}'],

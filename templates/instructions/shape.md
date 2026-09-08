@@ -222,6 +222,10 @@ flowchart LR
 ```
 ````
 
+Diagrams at note width: flowchart, sequence, state, class, ER, pie and mindmap read well in
+260 or 380 px. Gantt, journey, timeline, quadrant and git graphs are drawn at the note's width
+too but are wide by nature - keep them to a handful of items, or give them a content frame.
+
 Keep it an aside: a screen's worth of reading at most. The spec, the flow, the mood board stay
 content frames - a note explains, it does not document. Every viewer can fold a note to its
 corner tab (the choice is theirs, never saved to the board) and hide all of them with `N`.
