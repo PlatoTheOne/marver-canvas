@@ -7,6 +7,9 @@
 import { Marked } from 'marked'
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+/** Prose text: markup escaped, but an entity the author wrote (`&copy;`, `&#x41;`) keeps its
+ *  meaning - marked's own rule; a raw `<` is still never a tag. */
+const escapeText = (s: string) => s.replace(/&(?!#?\w+;)|[<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 /** D3: named color families for inline Md - the SAME families the diagrams use, so prose and
  *  the diagram beside it speak one color language. Theme pairs (light/dark). Bound to classes,
@@ -42,7 +45,7 @@ const marked = new Marked({
     // (`token.escaped`); here every text token is escaped - there is no raw block to serve
     text(token: any) {
       if (token.tokens) return this.parser.parseInline(token.tokens)
-      return escapeHtml(String(token.text ?? ''))
+      return escapeText(String(token.text ?? ''))
     },
     link(token: any) {
       const href = String(token.href ?? '')
@@ -89,14 +92,17 @@ export function renderMarkdown(src: string): string {
 // not of every renderer branch - the shell realm (sticky notes) is more privileged than a
 // frame, so the HTML it inserts is checked element by element, attribute by attribute.
 const TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'strong', 'em', 'del', 's', 'a', 'img', 'hr', 'br', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'span', 'input', 'div', 'sup', 'sub'])
-const ATTRS: Record<string, (v: string) => boolean> = {
+export const ATTR_POLICY: Record<string, (v: string) => boolean> = {
   href: (v) => v === '#' || /^https?:\/\//i.test(v) || /^mailto:/i.test(v),
-  'data-goto': (v) => /^[\w./-]+$/.test(v),
+  // a frame id: any path text without markup, quotes, spaces or a scheme (ids are unicode-free
+  // by convention but not by law - `checkout/café` is a real id)
+  'data-goto': (v) => v.length > 0 && v.length <= 300 && !/[\s<>"'`:\\]/.test(v) && !v.split('/').some((seg) => seg === '..' || seg === ''),
   target: (v) => v === '_blank',
   rel: (v) => v === 'noopener noreferrer',
-  src: (v) => v.startsWith('/design/assets/') && !v.includes('..'),
+  // exactly what assetUrl emits: inside design/assets, no traversal SEGMENT (`flow..png` is a name)
+  src: (v) => v.startsWith('/design/assets/') && !v.slice('/design/assets/'.length).split('/').some((seg) => seg === '..' || seg === '.' || seg === ''),
   alt: () => true, title: () => true, loading: (v) => v === 'lazy',
-  class: (v) => /^(mv-[\w-]+|language-[\w-]+)( (mv-[\w-]+|language-[\w-]+))*$/.test(v),
+  class: (v) => v.split(' ').every((c) => /^(mv-|language-)[^\s"'<>]+$/.test(c)),
   align: (v) => /^(left|center|right)$/.test(v),
   type: (v) => v === 'checkbox', checked: () => true, disabled: () => true,
   start: (v) => /^\d+$/.test(v), colspan: (v) => /^\d+$/.test(v), rowspan: (v) => /^\d+$/.test(v),
@@ -109,7 +115,7 @@ export function sanitizeMarkdownHtml(html: string): string {
     for (const child of [...el.children]) {
       if (!TAGS.has(child.tagName.toLowerCase())) { child.remove(); continue }
       for (const a of [...child.attributes]) {
-        const ok = ATTRS[a.name]
+        const ok = ATTR_POLICY[a.name]
         if (!ok || !ok(a.value)) child.removeAttribute(a.name)
       }
       if (child.tagName === 'INPUT') child.setAttribute('disabled', '')

@@ -107,12 +107,34 @@ describe('what a note may not do', () => {
     expect(renderMarkdown('a <b onclick=x>b</b>')).not.toMatch(/<b/)
     expect(renderMarkdown('[x](javascript:alert(1))')).toBe('<p>x</p>\n')
   })
+  it('entities the author wrote keep their meaning; a bare ampersand is escaped', () => {
+    expect(renderMarkdown('&copy; &amp; &#x41; fish & chips <b>')).toBe('<p>&copy; &amp; &#x41; fish &#38; chips &#60;b&#62;</p>\n')
+  })
+  it('the allowlist keeps what the renderer legitimately emits', async () => {
+    // node has no DOMParser; the browser suite exercises sanitizeMarkdownHtml - here, the policies it calls
+    const { ATTR_POLICY } = await import('../src/client/content/md.ts')
+    expect(ATTR_POLICY['data-goto']('checkout/café')).toBe(true)
+    expect(ATTR_POLICY['data-goto']('../x')).toBe(false)
+    expect(ATTR_POLICY['data-goto']('a b')).toBe(false)
+    expect(ATTR_POLICY.src('/design/assets/flow..png')).toBe(true)
+    expect(ATTR_POLICY.src('/design/assets/../x.png')).toBe(false)
+    expect(ATTR_POLICY.src('/etc/passwd')).toBe(false)
+    expect(ATTR_POLICY.class('language-c++')).toBe(true)
+    expect(ATTR_POLICY.class('mv-c-blue')).toBe(true)
+    expect(ATTR_POLICY.class('evil')).toBe(false)
+  })
   it('diagram source cannot name a resource: URL schemes (either slash), protocol-relative, image shapes', () => {
     expect(() => guardDiagramSource('flowchart LR\n A --> B')).not.toThrow()
     expect(() => guardDiagramSource('flowchart LR\n A@{ img: "https:\\\\example.invalid/p.png", label: "i" }')).toThrow()
     expect(() => guardDiagramSource('flowchart LR\n A@{img:"x.png"}')).toThrow()
     expect(() => guardDiagramSource('graph LR\n A["//cdn/x"]')).toThrow()
     expect(() => guardDiagramSource('graph LR\n A["http://x"]')).toThrow()
+    // decoded first: escapes and entities are what mermaid acts on
+    expect(() => guardDiagramSource('flowchart LR\n A@{ "img": "\\u002f\\u002fexample.invalid/p.png" }')).toThrow()
+    expect(() => guardDiagramSource('flowchart LR\n A@{ "\\u0069mg": "x" }')).toThrow()
+    expect(() => guardDiagramSource('flowchart LR\n A@{ label: "&sol;&sol;host/x" }')).toThrow()
+    expect(() => guardDiagramSource('%%{init: {"themeCSS": ".x { background-image: url(//h/p.png) }"}}%%\nflowchart LR\n A')).toThrow()
+    expect(() => guardDiagramSource('flowchart LR\n A@{ shape: rect, label: "plain" }')).not.toThrow()
   })
 })
 

@@ -265,17 +265,20 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
       const W = 320, GAP = 30
       const rect = document.querySelector(`[data-node="${CSS.escape(node.key)}"]`)?.getBoundingClientRect()
       if (!rect) return 'r'
+      // a showing sticky column sits in the left gutter in WORLD px (its width + 36, the CSS
+      // margin): the card lands beyond it, so both room and collision use that screen offset
+      const scale = rect.width / Math.max(1, node.w)
+      const col = noteColumn()
+      const gutter = col ? col.getBoundingClientRect().width + 36 * scale : 0
       const occupied = (s: 'l' | 'r') => {
-        const rx = s === 'r' ? rect.right + 10 : rect.left - 10 - W
+        const rx = s === 'r' ? rect.right + 10 : rect.left - gutter - 10 - W
         return [...document.querySelectorAll('.sh-node, .sh-notes:not(.off)')].some((n) => {
           if (n.getAttribute('data-node') === node.key || n.getAttribute('data-node-notes') === node.key) return false
           const r = n.getBoundingClientRect()
           return r.left < rx + W && r.right > rx && r.top < rect.bottom && r.bottom > rect.top
         })
       }
-      // a showing sticky column sits in the left gutter: the card must fit BEYOND it
-      const gutter = noteColumn()?.getBoundingClientRect().width ?? 0
-      const room = (s: 'l' | 'r') => (s === 'r' ? window.innerWidth - rect.right : rect.left - (gutter ? gutter + 12 : 0)) >= W + GAP
+      const room = (s: 'l' | 'r') => (s === 'r' ? window.innerWidth - rect.right : rect.left - gutter) >= W + GAP
       const prefer: ('l' | 'r')[] = pinPos(activeThread2).x < node.w / 2 ? ['l', 'r'] : ['r', 'l']
       return prefer.find((s) => room(s) && !occupied(s)) ?? prefer.find(room) ?? prefer[0]
     }

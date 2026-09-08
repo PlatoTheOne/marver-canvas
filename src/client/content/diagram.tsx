@@ -72,8 +72,25 @@ export function withFamilies(src: string): string {
  *  (scheme + // or scheme + \\, protocol-relative //), and the `img:` shape data of the
  *  flowchart node syntax `A@{ img: ... }` - the one construct that loads a resource at all. */
 export function guardDiagramSource(src: string): void {
-  if (/(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(src) || /[a-z][a-z0-9+.-]*:\\/i.test(src)) throw new Error('URLs are not allowed in diagram source - use local design/assets/ images in an Img block instead')
-  if (/@\s*\{[^}]*\bimg\s*:/i.test(src)) throw new Error('image shapes are not allowed in diagram source')
+  // judge the DECODED text: mermaid resolves \uXXXX, \xXX and HTML entities in shape data and
+  // labels before it acts on them, so an escaped `//` or a quoted, escaped `"img"` key is the
+  // same request in the end. Directives and front matter are gone by now (cleanSource) - a
+  // themeCSS with url() never reaches the renderer either way, url( is refused here too.
+  const text = decodeEscapes(src)
+  if (/(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(text) || /[a-z][a-z0-9+.-]*:\\/i.test(text)) throw new Error('URLs are not allowed in diagram source - use local design/assets/ images in an Img block instead')
+  if (/url\s*\(/i.test(text) || /@import\b/i.test(text)) throw new Error('external resources are not allowed in diagram source')
+  if (/@\s*\{/.test(text) && /["'`]?\s*img\s*["'`]?\s*:/i.test(text)) throw new Error('image shapes are not allowed in diagram source')
+  if (/%%\s*\{/.test(text) || /^\s*---/.test(text)) throw new Error('directives are not allowed in diagram source')
+}
+/** \uXXXX, \u{...}, \xXX and numeric/named HTML entities -> the characters they stand for. */
+export function decodeEscapes(src: string): string {
+  return src
+    .replace(/\\u\{([0-9a-f]{1,6})\}/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\x([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#x([0-9a-f]{1,6});/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d{1,7});/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&sol;/gi, '/').replace(/&bsol;/gi, '\\').replace(/&colon;/gi, ':').replace(/&quot;/gi, '"').replace(/&apos;/gi, "'")
 }
 
 /** Remove external URL references from rendered SVG (images, links, href attrs). */

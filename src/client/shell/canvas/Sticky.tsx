@@ -15,7 +15,7 @@
  */
 import { memo, useEffect, useMemo, useRef } from 'react'
 import { renderMarkdown, sanitizeMarkdownHtml } from '../../content/md.ts'
-import { guardDiagramSource, sanitizeSvg } from '../../content/diagram.tsx'
+import { cleanSource, guardDiagramSource, sanitizeSvg } from '../../content/diagram.tsx'
 import { useComments } from '../comments-store.ts'
 import { goTo } from '../goto.ts'
 import { NOTE_W, SCENE_NOTE_W, noteAnchor, noteVisible, useNotes, type NoteKind } from '../notes.ts'
@@ -56,7 +56,7 @@ async function renderDiagrams(body: HTMLElement, alive: () => boolean) {
   })
   for (const code of fences) {
     const pre = code.parentElement!
-    const src = code.textContent ?? ''
+    const src = cleanSource(code.textContent ?? '')   // front matter and %%{init}%% directives never reach mermaid (the Diagram rule)
     const host = document.createElement('div')
     host.className = 'sh-sticky-diagram'
     try {
