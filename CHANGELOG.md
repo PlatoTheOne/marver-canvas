@@ -2,6 +2,26 @@
 
 Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 
+## 0.19.0 - 2026-09-08
+
+### Added
+
+- **Sticky notes.** A markdown file beside a frame (`cart.note.md` next to `cart.tsx`, `.jsx` or
+  `.html`) or a scene (`_note.md` in the scene directory) renders as a yellow note left of the
+  frame on the canvas - the scene's on the scene's first frame of the board, above the frame's
+  own. Markdown with the Md block's rules (`goto:` links jump to a frame, images from
+  `design/assets/`, raw HTML inert) and ` ```mermaid ` fences drawn hand-drawn. Comments pin on a
+  note's elements as on a frame's; a folded note parks its pins on its tab. Tidy keeps room for
+  notes. Every viewer folds a note at its corner and hides all with `N`; the choice stays in the
+  browser, never in the board file. Published and shared canvases carry the notes, their images
+  copied like any Md image. An edit to a note file updates the sticky in place; the frame is never
+  reloaded.
+
+### Changed
+
+- The manifest carries `note` on frames and scenes; the dev watcher regenerates it when a note
+  file changes.
+
 ## 0.18.0 - 2026-09-07
 
 ### Changed

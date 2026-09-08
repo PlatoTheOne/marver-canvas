@@ -187,6 +187,42 @@ of described imagery every time (the full asset rules: instructions/craft.md,
   has the shell-less way) and adjust the per-row count until it reads well. "The code
   says they're the same width" proves nothing.
 
+## Sticky notes - the aside beside a frame
+
+A sticky note is one markdown file beside the thing it explains. It renders as a yellow note
+left of the frame on the canvas, in dev and in every published or shared canvas. Nothing to
+declare, no board node, no imports, no iframe:
+
+| For | Write | Shows |
+|---|---|---|
+| a frame `checkout/cart` (`cart.tsx`, `cart.jsx` or `cart.html`) | `design/scenes/checkout/cart.note.md` | left of that frame, 260 wide |
+| a scene `checkout` | `design/scenes/checkout/_note.md` | left of the scene's first frame on the board, 380 wide |
+| a component frame | `design/components/<name>.note.md` | as a frame note |
+
+Write one when a reader needs something the screen cannot say: what the frame is for, what
+differs between two variations, how a mechanism works, an open question. Markdown, the Md
+block's rules: `[text](goto:scene/frame)` links jump to a frame on the canvas, `http(s)`
+links open a new tab, images are `design/assets/` paths, raw HTML is inert, and a
+` ```mermaid ` fence renders hand-drawn, in the note's own yellow. Readers can comment on any
+element of a note exactly as on a frame element.
+
+```md
+## Why the jobs list leads
+
+Drivers ask "where am I going first" - the list beats the map here.
+Compare with the [empty day](goto:app-home/today-empty): same header, one call to action.
+
+```mermaid
+flowchart LR
+  Login --> Today --> Jobs
+```
+```
+
+Keep it an aside: a screen's worth of reading at most. The spec, the flow, the mood board stay
+content frames - a note explains, it does not document. Every viewer can fold a note to its
+corner tab (the choice is theirs, never saved to the board) and hide all of them with `N`.
+Edits to a note file land on the canvas as you save, without reloading the frame.
+
 ## When Shape ends
 
 The board holds the agreed flow, spec, and direction. Wireframe picks up from

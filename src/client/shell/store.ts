@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { ROUTE, slideSize } from '../const.ts'
-import { tidy, parseLayout, type BoardLayout } from './tidy.ts'
+import { tidy, parseLayout, type BoardLayout, type TidyNode } from './tidy.ts'
+import { noteReserve } from './notes.ts'
 import { stableNodeKey } from './keys.ts'
 // @ts-expect-error virtual module provided by the plugin
 import shConfig from 'virtual:sh-config'
@@ -50,8 +51,8 @@ export function hydrateBoardPolicy(boards: Record<string, { type?: string; open?
   for (const [k, v] of Object.entries(boards)) if (!BOARD_POLICY[k]) BOARD_POLICY[k] = v
 }
 
-export interface FrameEntry { id: string; file: string; kind: 'tsx' | 'html'; scene: string; title?: string; viewport?: string; theme?: string; variantGroup?: string; variant?: string; intent?: string; contentWidth?: number; slide?: boolean }
-export interface Manifest { frames: FrameEntry[]; scenes: { name: string; frames: number; title?: string; description?: string }[] }
+export interface FrameEntry { id: string; file: string; kind: 'tsx' | 'html'; scene: string; title?: string; viewport?: string; theme?: string; variantGroup?: string; variant?: string; intent?: string; contentWidth?: number; slide?: boolean; note?: string }
+export interface Manifest { frames: FrameEntry[]; scenes: { name: string; frames: number; title?: string; description?: string; note?: string }[] }
 export interface Node {
   key: string; frame: string; x: number; y: number; w: number; h: number
   /** RESOLVED theme (what renders): themeUser ?? frame meta.theme ?? viewTheme. */
@@ -207,6 +208,21 @@ export async function boardFrames(name: string): Promise<string[]> {
 }
 
 const HEADER = 28
+/** What tidy sees: nodes with their scene, variant run, header-inclusive height, and the sticky
+ *  note width to reserve in front (spec 18: the frame's note, and the scene's on every member -
+ *  tidy keeps the scene reserve on the first node it places). */
+export function tidyInput(nodes: readonly Node[], manifest: Manifest | null): TidyNode[] {
+  const entryOf = (id: string) => manifest?.frames.find((f) => f.id === id)
+  const sceneNote = (scene: string) => !!manifest?.scenes.find((s) => s.name === scene)?.note
+  return nodes.map((n) => {
+    const f = entryOf(n.frame)
+    const scene = f?.scene ?? ''
+    return {
+      key: n.key, frame: n.frame, scene, group: f?.variantGroup, variant: f?.variant, w: n.w, h: n.h + HEADER,
+      noteW: noteReserve(!!f?.note, false), sceneNoteW: noteReserve(false, sceneNote(scene)),
+    }
+  })
+}
 let toastSeq = 0
 const nodeKey = () => 'n_' + Math.random().toString(36).slice(2, 8)
 
@@ -613,11 +629,7 @@ export const useStore = create<State>((set, get) => {
         }
       }
       if ((!boardHash || needTidy) && nodes.length) {
-        const entryOf = (id: string) => manifest.frames.find((f) => f.id === id)
-        const placedAll = tidy(nodes.map((n) => {
-          const f = entryOf(n.frame)
-          return { key: n.key, frame: n.frame, scene: f?.scene ?? '', group: f?.variantGroup, variant: f?.variant, w: n.w, h: n.h + HEADER }
-        }), effectiveLayout(layout, sceneRows), layoutWarn)
+        const placedAll = tidy(tidyInput(nodes, manifest), effectiveLayout(layout, sceneRows), layoutWarn)
         for (const pl of placedAll) { const n = nodes.find((x) => x.key === pl.key)!; n.x = pl.x; n.y = pl.y }
       }
       // dirty matches disk by construction - except when load-time pruning changed the
@@ -625,11 +637,7 @@ export const useStore = create<State>((set, get) => {
       // surface recipe problems at load (dry-run): materialized boards otherwise
       // never run tidy, so a broken agent-authored layout would fail silently
       if (layout && boardHash && !needTidy && nodes.length) {
-        const entryOf2 = (id: string) => manifest.frames.find((f) => f.id === id)
-        tidy(nodes.map((n) => {
-          const f = entryOf2(n.frame)
-          return { key: n.key, frame: n.frame, scene: f?.scene ?? '', group: f?.variantGroup, variant: f?.variant, w: n.w, h: n.h + HEADER }
-        }), layout, layoutWarn)
+        tidy(tidyInput(nodes, manifest), layout, layoutWarn)
       }
       return { manifest, nodes, boardHash, boardAuto, deviceView, sceneRows, layout, layoutRaw, baseLayout, selection: [], dirty: prunedAtLoad }
     } catch { return null }
@@ -1203,11 +1211,7 @@ export const useStore = create<State>((set, get) => {
     },
     runTidy() {
       const { nodes, manifest, sceneRows, layout } = get()
-      const entryOf = (id: string) => manifest?.frames.find((f) => f.id === id)
-      const placed = tidy(nodes.map((n) => {
-        const f = entryOf(n.frame)
-        return { key: n.key, frame: n.frame, scene: f?.scene ?? '', group: f?.variantGroup, variant: f?.variant, w: n.w, h: n.h + HEADER }
-      }), effectiveLayout(layout, sceneRows), layoutWarn)
+      const placed = tidy(tidyInput(nodes, manifest), effectiveLayout(layout, sceneRows), layoutWarn)
       set((s) => ({
         nodes: s.nodes.map((n) => {
           const p = placed.find((x) => x.key === n.key)

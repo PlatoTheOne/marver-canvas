@@ -1022,6 +1022,8 @@ body.sh-hide-ui .sh-play-nav { display: none !important }
   margin-left: calc(-1 * clamp(8px, calc(12px * var(--sh-inv, 1)), 36px)) }
 .cm-card.parked.dock-l.flank-shim { margin-left: calc(-1 * clamp(18px, calc(28px * var(--sh-inv, 1)), 68px)) }
 .cm-card.parked.dock-l.flank-badge { margin-left: calc(-1 * clamp(26px, calc(44px * var(--sh-inv, 1)), 108px)) }
+/* a sticky column (spec 18) is world-sized: the card clears it and its gutter */
+.cm-card.parked.dock-l.flank-note { margin-left: calc(-1 * (var(--sh-note-w, 260px) + 36px)) }
 /* PLAY: fixed beside the static device, viewport-clamped (position comes inline). Near-solid
    ground - the stage floats the card over arbitrary artwork on a dark room, glass is unreadable
    there. No transform: play has no zoom, and a leaked --sh-inv must never scale it. */
@@ -1265,3 +1267,75 @@ body.sh-hide-ui .sh-play-nav { display: none !important }
 .sh-slides-strip .bar { width: 140px; height: 3px; border-radius: 999px; background: var(--glass-hover); overflow: hidden }
 .sh-slides-strip .bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .25s ease }
 @media (max-width: 480px) { .sh-slides-strip .bar { width: 80px } }
+
+
+/* ---- sticky notes (spec 18): the yellow column left of a frame ------------------------------
+   World-sized (it scales with the canvas, like the artwork); the fold's hit target keeps a screen
+   minimum through --sh-inv. Yellow in both shell themes - a sticky is yellow. */
+.sh-node { --note-bg: #fff3a3; --note-bg-2: #ffeb85; --note-ink: #2b2500; --note-dim: rgba(43, 37, 0, .62);
+  --note-line: rgba(107, 90, 0, .28); --note-link: #7a4d00; --note-fold: #e9cf5e; --note-fold-2: #c9ae3c }
+.sh-node[data-theme="dark"] { --note-bg: #f3e27e; --note-bg-2: #e9d363; --note-fold: #d4bb4c; --note-fold-2: #a88f2a }
+.sh-notes { position: absolute; right: 100%; top: 0; margin-right: 24px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 12px; pointer-events: none }
+.sh-notes.below-vbadge { top: 72px }
+.sh-notes > * { pointer-events: auto }
+.sh-sticky { position: relative; box-sizing: border-box; background: var(--note-bg); color: var(--note-ink);
+  border-radius: 2px 10px 2px 2px; padding: 14px 16px 12px;
+  box-shadow: 0 1px 2px rgba(60, 45, 0, .18), 0 6px 18px -6px rgba(60, 45, 0, .35);
+  font: 400 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  transform-origin: top right; opacity: 1; visibility: visible;
+  transition: transform .18s cubic-bezier(.2, .7, .3, 1), opacity .16s ease, visibility 0s linear 0s;
+  user-select: text; -webkit-user-select: text; cursor: default }
+.sh-sticky[data-sticky="scene"] { padding: 18px 20px 16px; font-size: 14px }
+.sh-notes.off .sh-sticky { transform: scale(.04); opacity: 0; visibility: hidden;
+  transition: transform .18s cubic-bezier(.4, 0, .8, .4), opacity .14s ease .04s, visibility 0s linear .18s; pointer-events: none }
+/* the dog-ear: on the column it is the top sticky's folded corner; folded, it is the tab that stays */
+.sh-notes-fold { position: absolute; top: 0; right: 0; z-index: 2; padding: 0; border: 0; cursor: pointer;
+  width: clamp(22px, calc(14px * var(--sh-inv, 1)), 72px); height: clamp(22px, calc(14px * var(--sh-inv, 1)), 72px);
+  border-radius: 0 10px 0 4px;
+  background: linear-gradient(225deg, transparent 50%, var(--note-fold) 50%, var(--note-fold-2) 100%);
+  transition: background .18s ease, border-radius .18s ease, box-shadow .18s ease, transform .18s ease }
+.sh-notes-fold:hover { filter: brightness(.96) }
+.sh-notes-fold:focus-visible { outline: 2px solid var(--accent, #2f6df6); outline-offset: 2px }
+.sh-notes.off .sh-notes-fold { border-radius: 3px 3px 3px 8px; background: linear-gradient(160deg, var(--note-bg) 0%, var(--note-bg-2) 100%);
+  box-shadow: 0 1px 2px rgba(60, 45, 0, .25), 0 3px 8px -2px rgba(60, 45, 0, .35) }
+.sh-notes.off .sh-notes-fold::after { content: ""; position: absolute; right: 0; top: 0; width: 38%; height: 38%;
+  border-radius: 0 3px 0 3px; background: linear-gradient(225deg, transparent 50%, var(--note-fold-2) 50%) }
+@media (prefers-reduced-motion: reduce) { .sh-sticky, .sh-notes-fold { transition: none } }
+/* comment mode: hover names the element the click would pick; the lock is the shell's own outline */
+body.sh-commenting .sh-sticky-body :is(p, li, h1, h2, h3, h4, blockquote, pre, img, table, .sh-sticky-diagram):hover { outline: 1.5px solid var(--accent, #2f6df6); outline-offset: 2px; border-radius: 3px }
+body.sh-commenting .sh-sticky-body { cursor: crosshair }
+.sh-sticky-body [data-sh-lock] { outline: 2px solid hsl(var(--cm-h, 48) 80% 42%); outline-offset: 3px; border-radius: 3px;
+  box-shadow: 0 0 0 5px hsl(var(--cm-h, 48) 90% 60% / .28) }
+/* prose: the Md block's vocabulary, sized for an aside */
+.sh-sticky-body > :first-child { margin-top: 0 }
+.sh-sticky-body > :last-child { margin-bottom: 0 }
+.sh-sticky-body h1, .sh-sticky-body h2, .sh-sticky-body h3, .sh-sticky-body h4 { margin: 0 0 6px; line-height: 1.25; letter-spacing: -0.01em; text-wrap: balance }
+.sh-sticky-body h1 { font-size: 1.28em; font-weight: 700 }
+.sh-sticky-body h2 { font-size: 1.14em; font-weight: 650 }
+.sh-sticky-body h3, .sh-sticky-body h4 { font-size: 1em; font-weight: 650 }
+.sh-sticky-body p, .sh-sticky-body ul, .sh-sticky-body ol, .sh-sticky-body blockquote, .sh-sticky-body pre, .sh-sticky-body table { margin: 0 0 8px }
+.sh-sticky-body ul, .sh-sticky-body ol { padding-left: 18px }
+.sh-sticky-body li { margin: 2px 0 }
+.sh-sticky-body li > ul, .sh-sticky-body li > ol { margin-bottom: 0 }
+.sh-sticky-body blockquote { padding: 2px 0 2px 10px; border-left: 3px solid var(--note-line); color: var(--note-dim) }
+.sh-sticky-body a { color: var(--note-link); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: rgba(122, 77, 0, .45) }
+.sh-sticky-body a:hover { text-decoration-color: currentColor }
+.sh-sticky-body a[data-goto]::after { content: "\2197"; font-size: .8em; margin-left: 2px; text-decoration: none; display: inline-block }
+.sh-sticky-body code { font: 500 .9em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: rgba(43, 37, 0, .07); padding: 1px 4px; border-radius: 3px }
+.sh-sticky-body pre { padding: 8px 10px; border-radius: 6px; background: rgba(43, 37, 0, .07); overflow-x: auto; white-space: pre }
+.sh-sticky-body pre code { background: none; padding: 0; font-weight: 400 }
+.sh-sticky-body pre.err { background: rgba(190, 40, 20, .1); color: #7a1f0f }
+.sh-sticky-body hr { border: 0; border-top: 1px solid var(--note-line); margin: 10px 0 }
+.sh-sticky-body img { max-width: 100%; border-radius: 4px; display: block }
+.sh-sticky-body strong { font-weight: 650 }
+.sh-sticky-body table { border-collapse: collapse; font-size: .92em; width: 100%; display: block; overflow-x: auto }
+.sh-sticky-body th, .sh-sticky-body td { border: 1px solid var(--note-line); padding: 3px 6px; text-align: left; vertical-align: top }
+.sh-sticky-body th { font-weight: 650; background: rgba(43, 37, 0, .05) }
+.sh-sticky-body input[type="checkbox"] { margin: 0 6px 0 0; vertical-align: -1px }
+.sh-sticky-body .mv-md-noimg { color: var(--note-dim); font-style: italic }
+.sh-sticky-body .mv-c-blue { color: #0070d6 } .sh-sticky-body .mv-c-orange { color: #c9640a } .sh-sticky-body .mv-c-purple { color: #9a23ad }
+.sh-sticky-body .mv-c-green { color: #1a8a3f } .sh-sticky-body .mv-c-red { color: #c72a22 } .sh-sticky-body .mv-c-gray { color: #6b7480 }
+/* the hand-drawn diagram: the fence's place, the paper's colors, scaled to the column */
+.sh-sticky-diagram { margin: 4px 0 10px; overflow: visible }
+.sh-sticky-diagram svg { display: block; max-width: 100%; height: auto }

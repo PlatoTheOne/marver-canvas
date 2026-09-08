@@ -9,6 +9,7 @@ import { createPortal } from 'react-dom'
 import { avatarFallback, useComments } from './comments-store.ts'
 import { useStore, type Node } from './store.ts'
 import { threadHostKey } from './keys.ts'
+import { isNoteAnchor, resolveNoteAnchor, useNotes } from './notes.ts'
 import { canvasCtl } from './canvas/ctl.ts'
 import { bootHash, buildHash, parseHash, writeHash } from './hash.ts'
 import { ArrowUpIcon, CheckIcon, CheckSquareOffsetIcon, LinkIcon, ParallelogramFillIcon, PencilSimpleIcon, PlusIcon, XIcon } from './icons.tsx'
@@ -138,22 +139,58 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
   // a remote resolve (thread leaves `open` while `active` is unchanged) still clears the lock
   const activeShown = !!active && open.some((t) => t.id === active)
 
+  // anchors split by where they live: in the frame document (inspect.js resolves them over
+  // postMessage) or on a sticky note (spec 18: shell DOM, resolved right here)
+  const inFrame = anchored.filter((t) => !isNoteAnchor(t.anchor))
+  const onNote = anchored.filter((t) => isNoteAnchor(t.anchor))
   // resolve anchors against the live frame whenever threads or the document change
   useEffect(() => {
     const win = iframe.current?.contentWindow
-    if (!win || node.status !== 'ready' || !anchored.length) return
-    const ask = () => win.postMessage({ type: 'sh:resolve-anchors', anchors: anchored.map((t) => ({ key: t.id, anchor: t.anchor })) }, location.origin)
+    if (!win || node.status !== 'ready' || !inFrame.length) return
+    const ask = () => win.postMessage({ type: 'sh:resolve-anchors', anchors: inFrame.map((t) => ({ key: t.id, anchor: t.anchor })) }, location.origin)
     const onMsg = (e: MessageEvent) => {
       if (e.source !== win || e.origin !== location.origin || e.data?.type !== 'sh:anchor-rects') return
       const next: typeof rects = {}
       for (const r of e.data.rects ?? []) next[r.key] = r.orphan ? null : r.rect
-      setRects(next)
+      setRects((prev) => ({ ...noteOnly(prev), ...next }))
     }
     window.addEventListener('message', onMsg)
     ask()
     const iv = setInterval(ask, 4000)          // re-renders, scroll, hot reloads - cheap to re-ask
     return () => { clearInterval(iv); window.removeEventListener('message', onMsg) }
-  }, [node.status, anchored.map((t) => t.id).join(','), iframe])
+  }, [node.status, inFrame.map((t) => t.id).join(','), iframe])
+  const noteOnly = (r: typeof rects) => Object.fromEntries(Object.entries(r).filter(([id]) => onNote.some((t) => t.id === id)))
+  // note anchors: measured in the shell, in node-body coordinates (negative x - the note is
+  // left of the frame). A folded column parks its pins on the fold; a note whose file is gone,
+  // or whose element the markdown no longer has, parks like an orphan. Re-measured on every
+  // fold/unfold (twice: at once and past the transition) and on the same 4 s beat as the frame.
+  const notesState = useNotes()
+  useEffect(() => {
+    if (!onNote.length) return
+    const measure = () => {
+      const host = document.querySelector(`[data-node="${CSS.escape(node.key)}"]`) as HTMLElement | null
+      const origin = host?.querySelector('.cm-layer')?.getBoundingClientRect()
+      if (!host || !origin) return
+      const s = origin.width ? origin.width / host.offsetWidth : 1
+      const toBody = (r: DOMRect) => ({ x: (r.left - origin.left) / s, y: (r.top - origin.top) / s, w: r.width / s, h: r.height / s })
+      const column = host.querySelector('.sh-notes')
+      const fold = column?.querySelector('.sh-notes-fold')
+      const next: typeof rects = {}
+      for (const t of onNote) {
+        const a = t.anchor as any
+        const body = column?.querySelector(`[data-sticky="${a.el.note}"] .sh-sticky-body`)
+        if (!body) { next[t.id] = null; continue }
+        if (column!.classList.contains('off')) { next[t.id] = fold ? toBody(fold.getBoundingClientRect()) : null; continue }
+        const el = resolveNoteAnchor(a, body)
+        next[t.id] = el ? toBody(el.getBoundingClientRect()) : null
+      }
+      setRects((prev) => ({ ...prev, ...next }))
+    }
+    measure()
+    const late = setTimeout(measure, 260)
+    const iv = setInterval(measure, 4000)
+    return () => { clearTimeout(late); clearInterval(iv) }
+  }, [onNote.map((t) => t.id).join(','), notesState.all, notesState.hidden.join(','), node.key, node.w, node.h])
 
   // #4/#5: drive the persistent element highlight into this frame - the composing draft on
   // this node (lock on pick), or the open thread anchored here (highlight on open). null
@@ -168,7 +205,15 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
     const draftHere = draft?.nodeKey === node.key ? (draft.anchor as any) : null
     const activeHere = active ? open.find((t) => t.id === active && (t.anchor as any)?.el) : undefined
     const anchor = show && showAnchor ? (draftHere ?? (activeHere ? (activeHere.anchor as any) : null)) : null
-    win.postMessage({ type: 'sh:highlight-anchor', frame: frameId, anchor: anchor ?? null }, location.origin)
+    win.postMessage({ type: 'sh:highlight-anchor', frame: frameId, anchor: isNoteAnchor(anchor) ? null : anchor ?? null }, location.origin)
+    // a note anchor lights its element in the shell the way the frame lights its own
+    const host = document.querySelector(`[data-node="${CSS.escape(node.key)}"]`)
+    for (const el of host?.querySelectorAll('[data-sh-lock]') ?? []) el.removeAttribute('data-sh-lock')
+    if (isNoteAnchor(anchor)) {
+      const body = host?.querySelector(`[data-sticky="${anchor.el.note}"] .sh-sticky-body`)
+      const el = body && resolveNoteAnchor(anchor, body)
+      if (el) el.setAttribute('data-sh-lock', '')
+    }
     // active/draft/show/showAnchor/activeShown are the triggers; `open` is read fresh from the closure
   }, [active, draft, show, showAnchor, activeShown, node.status, node.key, frameId, iframe])
 
@@ -181,6 +226,7 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
   // badge is widest, the working shimmer next. Reactive, so a job starting mid-read adjusts.
   const flankBadge = useStore((s) => !!s.frameFor(node)?.variantGroup)
   const flankShim = useStore((s) => s.working.includes(frameId))
+  const flankNote = useStore((s) => { const f = s.frameFor(node); return !!f?.note || !!(f && s.manifest?.scenes.find((sc) => sc.name === f.scene)?.note) })
   const drafting = draft?.nodeKey === node.key
   const alertIds = useMentionAlerts()
   if (!show || (!open.length && !drafting)) return null
@@ -216,8 +262,8 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
       if (!rect) return 'r'
       const occupied = (s: 'l' | 'r') => {
         const rx = s === 'r' ? rect.right + 10 : rect.left - 10 - W
-        return [...document.querySelectorAll('.sh-node')].some((n) => {
-          if (n.getAttribute('data-node') === node.key) return false
+        return [...document.querySelectorAll('.sh-node, .sh-notes:not(.off)')].some((n) => {
+          if (n.getAttribute('data-node') === node.key || n.getAttribute('data-node-notes') === node.key) return false
           const r = n.getBoundingClientRect()
           return r.left < rx + W && r.right > rx && r.top < rect.bottom && r.bottom > rect.top
         })
@@ -247,7 +293,7 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
       })}
       {activeThread2 && (
         <ThreadCard key={active} thread={activeThread2} at={pinPos(activeThread2)} bounds={{ w: node.w, h: node.h }} nodeKey={node.key} side={cardSide}
-          flank={cardSide === 'l' ? (flankBadge ? 'badge' : flankShim ? 'shim' : null) : null} />
+          flank={cardSide === 'l' ? (flankNote ? 'note' : flankBadge ? 'badge' : flankShim ? 'shim' : null) : null} />
       )}
       {draft?.nodeKey === node.key && <DraftComposer at={{ x: ((draft.anchor as any)?.rect?.x ?? 0) + ((draft.anchor as any)?.pos?.fx ?? 0.5) * ((draft.anchor as any)?.rect?.w ?? 0), y: ((draft.anchor as any)?.rect?.y ?? 0) + ((draft.anchor as any)?.pos?.fy ?? 0.5) * ((draft.anchor as any)?.rect?.h ?? 0) }} bounds={{ w: node.w, h: node.h }} hue={anchorHue(draft.anchor)} />}
     </>
@@ -538,7 +584,7 @@ function ComposeAvatar() {
   return <EditableAvatar author={me ?? undefined} size={24} />
 }
 
-export function ThreadCard({ thread, at, bounds, nodeKey, side = 'r', flank, stage }: { thread: Thread; at: { x: number; y: number }; bounds: { w: number; h: number }; nodeKey?: string; side?: 'l' | 'r'; flank?: 'badge' | 'shim' | null; stage?: boolean }) {
+export function ThreadCard({ thread, at, bounds, nodeKey, side = 'r', flank, stage }: { thread: Thread; at: { x: number; y: number }; bounds: { w: number; h: number }; nodeKey?: string; side?: 'l' | 'r'; flank?: 'badge' | 'shim' | 'note' | null; stage?: boolean }) {
   const { resolve, setActive } = useComments.getState()
   const me = useComments((s) => s.me)
   const local = useComments((s) => s.local)

@@ -4,7 +4,7 @@ import { basename, join } from 'node:path'
 import { hash } from './manifest.ts'
 import { NAME, PKG, ROUTE } from '../cli/name.ts'
 import { loadConfig, type ShConfig } from './config.ts'
-import { scanFrames, writeManifest, affectedFrameIds, type Manifest } from './manifest.ts'
+import { scanFrames, writeManifest, affectedFrameIds, isNoteFile, type Manifest } from './manifest.ts'
 import { apiMiddleware } from './api.ts'
 import { routesMiddleware } from './routes.ts'
 import { checkUpdate, installedVersion } from './update.ts'
@@ -256,7 +256,8 @@ export function marverPlugin(ctx: PluginCtx): Plugin {
       server.watcher.on('add', (f) => { if (inScope(f)) { regen(); rescanTheme() } })
       server.watcher.on('unlink', (f) => { if (inScope(f)) { regen(); rescanTheme() } })
       // change: only meta edits matter; scanFrames re-extracts and writeManifest de-dupes writes.
-      server.watcher.on('change', (f) => inScope(f) && (/\.(tsx|jsx)$/.test(f) || f.endsWith('_brief.md')) && regen())   // a brief's first line is its scene's description
+      // a brief's first line is its scene's description; a note file IS its sticky (spec 18)
+      server.watcher.on('change', (f) => inScope(f) && (/\.(tsx|jsx)$/.test(f) || f.endsWith('_brief.md') || isNoteFile(f)) && regen())
       const configFile = join(root, 'design', 'config.ts')
       server.watcher.on('change', (f) => {
         if (f !== configFile) return

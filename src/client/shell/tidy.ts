@@ -1,4 +1,10 @@
-export interface TidyNode { key: string; frame: string; scene: string; group?: string; variant?: string; w: number; h: number }
+export interface TidyNode {
+  key: string; frame: string; scene: string; group?: string; variant?: string; w: number; h: number
+  /** Sticky notes (spec 18), world px INCLUDING the gutter: reserved in front of this node
+   *  (its own note), and in front of the scene's first placed node (the scene note - carried on
+   *  every member, applied once). A column holds both, so the wider wins, never the sum. */
+  noteW?: number; sceneNoteW?: number
+}
 export interface Placed { key: string; x: number; y: number }
 
 // Lane-flow grammar: one shape at both scopes. A scope is rows XOR columns
@@ -43,7 +49,7 @@ const box = (id: string, parts: Array<{ key: string; dx: number; dy: number; w: 
 const runBox = (id: string, run: TidyNode[]): Box => {
   const parts: Array<{ key: string; dx: number; dy: number; w: number; h: number }> = []
   let dx = 0
-  for (const n of run) { parts.push({ key: n.key, dx, dy: 0, w: n.w, h: n.h }); dx += n.w + frameGapX(n.w) }
+  for (const n of run) { dx += n.noteW ?? 0; parts.push({ key: n.key, dx, dy: 0, w: n.w, h: n.h }); dx += n.w + frameGapX(n.w) }
   return box(id, parts)
 }
 
@@ -264,6 +270,18 @@ export function tidy(nodes: TidyNode[], layout?: BoardLayout, warn: Warn = () =>
   for (const scene of scenes) {
     const members = nodes.filter((n) => n.scene === scene)
     const m = layoutScene(scene, members, layout?.scenes?.[scene], warn)
+    // the scene note sits in front of the scene's first node in reading order (the host the
+    // shell picks): widen the scene box on the left by what that node's own note does not cover
+    const sceneNoteW = Math.max(0, ...members.map((n) => n.sceneNoteW ?? 0))
+    if (sceneNoteW) {
+      const placed = members.filter((n) => m.has(n.key))
+      const first = placed.reduce<TidyNode | null>((best, n) => {
+        const p = m.get(n.key)!, b = best && m.get(best.key)!
+        return !b || p.y < b.y || (p.y === b.y && p.x < b.x) ? n : best
+      }, null)
+      const extra = sceneNoteW - (first?.noteW ?? 0)
+      if (extra > 0) for (const [k, p] of m) m.set(k, { x: p.x + extra, y: p.y })
+    }
     sceneMaps.set(scene, m)
     const parts = members
       .filter((n) => m.has(n.key))

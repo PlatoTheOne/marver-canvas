@@ -9,6 +9,8 @@ import { registerFrame, unregisterFrame } from './frame-registry.ts'
 import { primeCameraFor } from './camera-broadcast.ts'
 import { sleep, wake } from './sleep.ts'
 import { canAutoReload, shouldArmReadyWatch } from './ready-watch.ts'
+import { Stickies, type NoteSpec } from './Sticky.tsx'
+import { noteId, sceneNoteHost } from '../notes.ts'
 
 export const HEADER = 28
 const SNAP = 12
@@ -51,6 +53,18 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
   const selected = useStore((s) => s.selection.includes(node.key))
   const interact = useStore((s) => s.interact === node.key)
   const working = useStore((s) => s.working.includes(node.frame))   // Live Jam: Marver is editing this frame
+  // sticky notes (spec 18): the scene's note when this node is the scene's first on the board
+  // (reading order), then the frame's own. Text is compared by value - a note edit re-renders
+  // only its column; a pan never re-renders any node (no position subscription here).
+  const sceneNote = useStore((s) => {
+    const scene = frame?.scene
+    const text = scene ? s.manifest?.scenes.find((sc) => sc.name === scene)?.note : undefined
+    if (!text) return undefined
+    return sceneNoteHost(s.nodes, (id) => s.manifest?.frames.find((f) => f.id === id)?.scene, scene!) === node.key ? text : undefined
+  })
+  const notes: NoteSpec[] = []
+  if (frame && sceneNote) notes.push({ kind: 'scene', id: noteId('scene', frame.scene), text: sceneNote })
+  if (frame?.note) notes.push({ kind: 'frame', id: noteId('frame', frame.id), text: frame.note })
   const workingSince = useStore((s) => s.workingSince[node.frame])
   // B0.1: no reactive scale subscription - it re-rendered every FrameNode on every
   // pan/zoom tick. gestureScale below measures the world rect (the canonical source,
@@ -346,12 +360,15 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
       className={`sh-node${selected ? ' sel' : ''}${interact ? ' interact' : ''}${working ? ' working' : ''}`}
       data-theme={node.theme}
       style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: node.w, height: node.h + HEADER, zIndex: hostsCard ? 30 : undefined,
+        // the sticky column's width (spec 18): the docked comment card clears it on the left
+        ...(notes.length ? { ['--sh-note-w' as string]: `${Math.max(...notes.map((n) => (n.kind === 'scene' ? 380 : 260)))}px` } : {}),
         // phase every working animation by when THIS frame's job started - parallel
         // frames pulsing in sync would read as one fake choreography
         ...(working ? { ['--mv-w0' as string]: `${-(Date.now() - (workingSince ?? Date.now()))}ms` } : {}) }}
       data-node={node.key}
     >
       {working && <WorkShimmer belowBadge={!!frame.variantGroup} />}
+      <Stickies nodeKey={node.key} frameId={frame.id} notes={notes} underBadge={!!frame.variantGroup} />
       {frame.variantGroup && (
         <div className="sh-vbadge sh-no-pan" title={`${frame.variantGroup} · variant ${frame.variant?.toUpperCase()} - click to select`}
           onPointerDown={(e) => e.stopPropagation()}

@@ -31,6 +31,9 @@ export interface FrameEntry {
   contentWidth?: number
   /** One sentence of purpose (meta.description, literal): what the frame is for, its state. */
   description?: string
+  /** Sticky note (spec 18): the markdown of `<frame>.note.md` beside the frame file, trimmed,
+   *  capped. Shown left of the frame on the canvas. Absent = no note. */
+  note?: string
 }
 /** The orientation file: what is on the canvas AND what each thing is for. `frames` and
  *  `scenes` are what the shell consumes; `project`, `folders`, `boards` and every
@@ -38,7 +41,7 @@ export interface FrameEntry {
 export interface Manifest {
   frames: FrameEntry[]
   /** `title` = what humans see (the brief's front matter); `name` = the directory */
-  scenes: { name: string; frames: number; title?: string; description?: string; brief?: string }[]
+  scenes: { name: string; frames: number; title?: string; description?: string; brief?: string; note?: string }[]
   project?: { name?: string; description?: string }
   folders?: { name: string; title?: string; description?: string }[]
   /** curated boards in sidebar order (folders flattened); never all-scenes */
@@ -49,6 +52,22 @@ export interface ProjectInfo { name?: string; description?: string }
 
 const FRAME_EXT = /\.(tsx|jsx|html)$/
 const RESERVED_SCENES = new Set(['components', 'screens'])
+
+/** Sticky notes (spec 18): the longest note the manifest carries - a note is an aside, not a spec. */
+export const NOTE_MAX = 20_000
+/** The note file beside a frame file: `cart.tsx` -> `cart.note.md`; a scene's is `_note.md`. */
+export const noteFileFor = (frameFile: string): string => frameFile.replace(FRAME_EXT, '.note.md')
+/** Is this path a note file - the dev watcher's "regenerate on change" predicate. */
+export const isNoteFile = (file: string): boolean => /(^|[\\/])(_note|[^\\/]+\.note)\.md$/.test(file)
+/** A note's text: BOM stripped, trimmed, capped at NOTE_MAX. Undefined when the file is missing,
+ *  empty, or not a regular file (a symlink is never followed - the `_brief.md` rule). */
+export function readNote(abs: string): string | undefined {
+  try {
+    if (!lstatSync(abs).isFile()) return undefined
+    const text = readFileSync(abs, 'utf8').replace(/^﻿/, '').trim()
+    return text ? text.slice(0, NOTE_MAX) : undefined
+  } catch { return undefined }
+}
 
 /** Extract `export const meta = {...}` with literal string values only. Anything else is silently omitted. */
 export function extractMeta(src: string): FrameMeta {
@@ -204,6 +223,11 @@ export function sceneBrief(root: string, scene: string): { title?: string; descr
   return { brief: rel, ...(title ? { title } : {}), ...(description ? { description } : {}) }
 }
 
+/** A scene's sticky note: `design/scenes/<scene>/_note.md` (spec 18). */
+export function sceneNote(root: string, scene: string): string | undefined {
+  return scene ? readNote(join(root, 'design', 'scenes', scene, '_note.md')) : undefined
+}
+
 /** Write a scene's title into its brief's front matter - only that line changes; the body,
  *  every other field and the file's own line endings are kept. No brief yet = a front-matter-only
  *  brief. An empty title removes the line, and the file when nothing else is in it. The write
@@ -283,6 +307,8 @@ export function scanFrames(root: string, project?: ProjectInfo): Manifest {
       }
       const kind = name.endsWith('.html') ? 'html' as const : 'tsx' as const
       const entry: FrameEntry = { id, file: `design/${rel}`, kind, scene }
+      const note = readNote(noteFileFor(abs))
+      if (note) entry.note = note
       if (kind === 'tsx') {
         const src = readFileSync(abs, 'utf8')
         const meta = extractMeta(src)
@@ -328,7 +354,10 @@ export function scanFrames(root: string, project?: ProjectInfo): Manifest {
 
   const sceneCounts = new Map<string, number>()
   for (const f of frames) sceneCounts.set(f.scene, (sceneCounts.get(f.scene) ?? 0) + 1)
-  const scenes = [...sceneCounts.entries()].map(([name, n]) => ({ name, frames: n, ...sceneBrief(root, name) })).sort((a, b) => a.name.localeCompare(b.name))
+  const scenes = [...sceneCounts.entries()].map(([name, n]) => {
+    const note = sceneNote(root, name)
+    return { name, frames: n, ...sceneBrief(root, name), ...(note ? { note } : {}) }
+  }).sort((a, b) => a.name.localeCompare(b.name))
 
   const info = project && (project.name || project.description) ? { project: { ...(project.name ? { name: project.name } : {}), ...(project.description ? { description: project.description } : {}) } } : {}
   return { ...info, ...scanBoards(root), scenes, frames }

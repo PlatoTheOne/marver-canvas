@@ -72,9 +72,13 @@ export function scanAssetRefs(src: string, moduleId: string): string[] {
     }
     if (posterM) out.push(posterM[1])
   }
-  for (const tpl of templates)
-    for (const m of tpl.matchAll(/!\[[^\]]*\]\(([^)\s"']+)\)/g)) out.push(m[1])
+  for (const tpl of templates) out.push(...markdownImageRefs(tpl))
   return out
+}
+
+/** Markdown image literals in prose: `![alt](path)`. Md content inside frames and sticky notes alike. */
+export function markdownImageRefs(md: string): string[] {
+  return [...md.matchAll(/!\[[^\]]*\]\(([^)\s"']+)\)/g)].map((m) => m[1])
 }
 
 /** Same shape the client's assetUrl accepts: relative, inside design/assets/, no tricks. */
@@ -232,7 +236,8 @@ export function publishedManifest(manifest: Manifest, pubFrames: FrameEntry[], p
     ...(pubFolders.length ? { folders: pubFolders } : {}),
     ...(pubBoards.length ? { boards: pubBoards } : {}),
     scenes: manifest.scenes.filter((s) => pubScenes.has(s.name))
-      .map(({ name, title, description, brief }) => ({ name, frames: pubFrames.filter((f) => f.scene === name).length, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(brief && !strip ? { brief } : {}) })),
+      // the note is viewer-facing canvas content (spec 18): it survives the source strip, the brief path does not
+      .map(({ name, title, description, brief, note }) => ({ name, frames: pubFrames.filter((f) => f.scene === name).length, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(brief && !strip ? { brief } : {}), ...(note ? { note } : {}) })),
     frames: pubFrames,
   }
 }
@@ -580,6 +585,9 @@ export async function buildSite(root: string, boardsFlag?: string, allBoardsFlag
     const rel = file.startsWith(rootP + '/') ? file.slice(rootP.length + 1) : file
     for (const r of scanAssetRefs(src, rel)) refs.add(r)
   }
+  // sticky notes (spec 18) are prose outside any module: their images ride the same copy
+  for (const note of [...pubManifest.frames.map((f) => f.note), ...pubManifest.scenes.map((s) => s.note)])
+    if (note) for (const r of markdownImageRefs(note)) refs.add(r)
   let copiedAssets = 0
   const realAssets = existsSync(assetsDir) ? realpathSync(assetsDir) : null
   // generated posters first: a `<clip>.poster.png` ref whose file is missing is rendered
