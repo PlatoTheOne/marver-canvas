@@ -73,7 +73,7 @@ export function scanAssetRefs(src: string, moduleId: string): string[] {
     }
     if (posterM) out.push(posterM[1])
   }
-  for (const tpl of templates) out.push(...markdownImageRefs(tpl))
+  for (const tpl of templates) out.push(...markdownImageRefs(tpl.slice(1, -1)))   // the literal's content, not its backticks (a backtick-wrapped string is a code span to the parser)
   return out
 }
 
