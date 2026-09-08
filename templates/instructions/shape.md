@@ -206,6 +206,13 @@ links open a new tab, images are `design/assets/` paths, raw HTML is inert, and 
 ` ```mermaid ` fence renders hand-drawn, in the note's own yellow. Readers can comment on any
 element of a note exactly as on a frame element.
 
+Placement is not your job: the canvas keeps the room. Every layout the shell composes - a
+board's `layout` recipe, the auto board, tidy, device views - reserves the note's width and
+gutter in front of its frame, and when a note lands on a board that is already composed (open
+or not) the recipe re-applies and the frames make way. Never move frames, pad a lane or
+measure a gap for a note: write the file and the board takes care of it. Only a board the
+human dragged by hand keeps its positions as they are; their `t` makes the room there.
+
 ````md
 ## Why the jobs list leads
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { ROUTE, slideSize } from '../const.ts'
 import { tidy, parseLayout, type BoardLayout, type TidyNode } from './tidy.ts'
-import { noteReserve } from './notes.ts'
+import { noteReserve, notesCramped } from './notes.ts'
 import { stableNodeKey } from './keys.ts'
 // @ts-expect-error virtual module provided by the plugin
 import shConfig from 'virtual:sh-config'
@@ -628,18 +628,22 @@ export const useStore = create<State>((set, get) => {
           }
         }
       }
-      if ((!boardHash || needTidy) && nodes.length) {
+      // a note that landed while this board was closed has no room in the saved positions:
+      // a board with a recipe re-applies it (spec 18 - room is the layout's job)
+      const cramped = !!boardHash && !needTidy && !!(layout || sceneRows?.length) && notesCramped(nodes, manifest)
+      if ((!boardHash || needTidy || cramped) && nodes.length) {
         const placedAll = tidy(tidyInput(nodes, manifest), effectiveLayout(layout, sceneRows), layoutWarn)
         for (const pl of placedAll) { const n = nodes.find((x) => x.key === pl.key)!; n.x = pl.x; n.y = pl.y }
       }
       // dirty matches disk by construction - except when load-time pruning changed the
-      // node set; callers see dirty:true and schedule the save that persists the prune
+      // node set (or a cramped note re-ran the recipe); callers see dirty:true and
+      // schedule the save that persists it
       // surface recipe problems at load (dry-run): materialized boards otherwise
       // never run tidy, so a broken agent-authored layout would fail silently
-      if (layout && boardHash && !needTidy && nodes.length) {
+      if (layout && boardHash && !needTidy && !cramped && nodes.length) {
         tidy(tidyInput(nodes, manifest), layout, layoutWarn)
       }
-      return { manifest, nodes, boardHash, boardAuto, deviceView, sceneRows, layout, layoutRaw, baseLayout, selection: [], dirty: prunedAtLoad }
+      return { manifest, nodes, boardHash, boardAuto, deviceView, sceneRows, layout, layoutRaw, baseLayout, selection: [], dirty: prunedAtLoad || cramped }
     } catch { return null }
   }
 
@@ -749,6 +753,9 @@ export const useStore = create<State>((set, get) => {
       liveScenes = scenes
       const m = get().manifest
       if (m) set({ manifest: { ...m, scenes } })   // before the first manifest: kept for the boot's commit
+      // a scene note arrived: a recipe board makes room for it beside the scene's first frame
+      const s = get()
+      if (s.manifest && (s.layout || s.sceneRows?.length) && notesCramped(s.nodes, s.manifest)) scheduleReflow()
     },
 
     // The whole sidebar tree in one write: order, membership, the folders themselves. The
@@ -871,6 +878,8 @@ export const useStore = create<State>((set, get) => {
         ...(changed ? { dirty: true, baseLayout: nextBase } : {}),
       }))
       if (changed) scheduleSave()
+      // a note file arrived (or grew onto a frame): a recipe board makes room for it
+      if ((get().layout || get().sceneRows?.length) && notesCramped(final, m)) scheduleReflow()
     },
 
     removeNode(key) {

@@ -7,7 +7,7 @@ import { markdownImageRefs, publishedManifest } from '../src/server/build.ts'
 import { renderMarkdown } from '../src/client/content/md.ts'
 import { guardDiagramSource } from '../src/client/content/diagram.tsx'
 import { tidy } from '../src/client/shell/tidy.ts'
-import { NOTE_GAP, NOTE_W, SCENE_NOTE_W, noteReserve, sceneNoteHost } from '../src/client/shell/notes.ts'
+import { NOTE_GAP, NOTE_W, SCENE_NOTE_W, noteReserve, notesCramped, sceneNoteHost } from '../src/client/shell/notes.ts'
 
 // Sticky notes (spec 18): a markdown file beside the thing it explains reaches the manifest as
 // `note`, the layout keeps room for it, and the shell knows which node shows a scene's.
@@ -181,5 +181,36 @@ describe('which node shows a scene note', () => {
     expect(sceneNoteHost(nodes, sceneOf, 't')).toBe('k4')
     expect(sceneNoteHost(nodes, sceneOf, 'u')).toBeNull()
     expect(sceneNoteHost([{ key: 'a', frame: 's/a', x: 0, y: 0 }, { key: 'b', frame: 's/b', x: 0, y: 0 }], sceneOf, 's')).toBe('a')
+  })
+})
+
+describe('room for a note is the layout’s job', () => {
+  const manifest = (notes: { frame?: boolean; scene?: boolean }) => ({
+    frames: [{ id: 's/a', scene: 's' }, { id: 's/b', scene: 's', note: notes.frame ? 'hi' : undefined }, { id: 't/c', scene: 't' }],
+    scenes: [{ name: 's', note: notes.scene ? 'intro' : undefined }, { name: 't' }],
+  })
+  const row = (bx: number) => [
+    { key: 'a', frame: 's/a', x: 0, y: 0, w: 390, h: 844 },
+    { key: 'b', frame: 's/b', x: bx, y: 0, w: 390, h: 844 },
+    { key: 'c', frame: 't/c', x: 2000, y: 0, w: 390, h: 844 },
+  ]
+  it('a frame note is cramped when its left neighbour stands inside the reserve, and not once tidy made room', () => {
+    expect(notesCramped(row(500), manifest({ frame: true }))).toBe(true)
+    expect(notesCramped(row(390 + noteReserve(true, false)), manifest({ frame: true }))).toBe(false)
+    expect(notesCramped(row(500), manifest({}))).toBe(false)                           // no note, no reserve
+    expect(notesCramped(row(500), null)).toBe(false)
+  })
+  it('a scene note counts on its host only; nodes in another row and missing nodes never cramp', () => {
+    // the scene note sits on `a` (first in reading order) whose left is free: not cramped
+    expect(notesCramped(row(500), manifest({ scene: true }))).toBe(false)
+    // move `a` under `b`: `b` hosts the scene note, `a` is in another row - still free
+    const stacked = [{ ...row(500)[0], y: 1200 }, row(500)[1], row(500)[2]]
+    expect(notesCramped(stacked, manifest({ scene: true }))).toBe(false)
+    // a node at x:300 in front of the host `b` (host by y, then x) is inside the 404 reserve
+    const front = [{ ...row(500)[0], x: 300, y: 0 }, { ...row(500)[1], x: 500, y: 0, key: 'b' }, row(500)[2]]
+    expect(notesCramped(front, manifest({ scene: true }))).toBe(false)               // `a` at 300 is the host, free on its left
+    const hostB = [{ ...row(500)[0], x: 300, y: 5 }, { ...row(500)[1], x: 500, y: 0 }, row(500)[2]]
+    expect(notesCramped(hostB, manifest({ scene: true }))).toBe(true)                // `b` (y 0) hosts; `a` stands in its reserve
+    expect(notesCramped([{ ...hostB[0], missing: true }, hostB[1], hostB[2]], manifest({ scene: true }))).toBe(false)
   })
 })

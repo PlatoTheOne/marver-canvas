@@ -64,6 +64,16 @@ export default () => <main style={{ minHeight: '100vh', background: '${bg}' }}><
     { key: 'n-home', frame: 'app/home', x: 0, y: 0, w: 390, h: 844 },
     { key: 'n-next', frame: 'app/next', x: 600, y: 0, w: 390, h: 844 },
   ] }, null, 2) + '\n')
+  // a composed board saved before its notes existed: the frames sit tight, no room for a column
+  writeFileSync(join(boards, 'recipe.json'), JSON.stringify({ version: 1, name: 'recipe', auto: false, layout: { rows: [['app']] }, nodes: [
+    { key: 'r-home', frame: 'app/home', x: 0, y: 0, w: 390, h: 844 },
+    { key: 'r-next', frame: 'app/next', x: 420, y: 0, w: 390, h: 844 },
+  ] }, null, 2) + '\n')
+  // the same, never opened while the note existed: the load must make the room
+  writeFileSync(join(boards, 'closed.json'), JSON.stringify({ version: 1, name: 'closed', auto: false, layout: { rows: [['app']] }, nodes: [
+    { key: 'c-home', frame: 'app/home', x: 0, y: 0, w: 390, h: 844 },
+    { key: 'c-next', frame: 'app/next', x: 420, y: 0, w: 390, h: 844 },
+  ] }, null, 2) + '\n')
   // a thread pinned on the frame note's second paragraph - persisted, as a collaborator left it
   const comments = join(root, 'design', 'comments')
   mkdirSync(comments, { recursive: true })
@@ -233,6 +243,40 @@ describe('sticky notes on the canvas', () => {
     await browser.until(s, `document.querySelectorAll('[data-node="n-next"] .sh-notes').length === 0`, 15_000)
     expect(log).not.toMatch(/error/i)
   })
+
+  it('a board with a recipe makes room for a note by itself when a note file lands live; saved positions stay when nothing is cramped', async () => {
+    if (!browser) return
+    const s = await browser.tab({ width: 1500, height: 950 })
+    await browser.go(s, `${ORIGIN}/#/b/recipe`)
+    await browser.until(s, `document.querySelectorAll('.sh-node').length === 2 && document.querySelectorAll('[data-node="r-home"] .sh-notes .sh-sticky').length === 2`, 30_000)
+    await wait(800)
+    const xs = () => browser!.eval(s, `(() => { const at = (k) => +document.querySelector('[data-node="' + k + '"]').style.transform.match(/translate\\((-?[\\d.]+)px/)[1]; return { home: at('r-home'), next: at('r-next') } })()`)
+    // home's column faces empty canvas: nothing is cramped, the saved positions are kept as they were
+    expect(await xs()).toEqual({ home: 0, next: 420 })
+    // a frame note lands on `next` while the board is open: its column would stand on `home` - the recipe re-applies
+    writeFileSync(join(root, 'design', 'scenes', 'app', 'next.note.md'), `The second screen.`)
+    await browser.until(s, `document.querySelector('[data-node="r-next"] [data-sticky="frame"] p')?.textContent === 'The second screen.'`, 15_000)
+    await browser.until(s, `(() => { const col = document.querySelector('[data-node="r-next"] .sh-notes')?.getBoundingClientRect(); const prev = document.querySelector('[data-node="r-home"]').getBoundingClientRect(); return !!col && col.left >= prev.right - 0.5 })()`, 15_000)
+    const after = await xs()
+    expect(after.next - after.home).toBeGreaterThanOrEqual(390 + 260 + 24)
+    // the room is saved with the board, so the next load starts from it
+    await wait(1500)
+    const saved = JSON.parse(await (await fetch(`${ORIGIN}/__mv/api/boards/recipe`)).text())
+    const at = (k: string) => saved.board.nodes.find((n: any) => n.key === k)
+    expect(at('r-next').x - at('r-home').x).toBeGreaterThanOrEqual(390 + 260 + 24)
+    // a board saved tight and never opened since the note landed: the load makes the room and saves it
+    const c = await browser.tab({ width: 1500, height: 950 })
+    await browser.go(c, `${ORIGIN}/#/b/closed`)
+    await browser.until(c, `document.querySelectorAll('.sh-node').length === 2 && document.querySelectorAll('[data-node="c-next"] .sh-notes .sh-sticky').length === 1`, 30_000)
+    await browser.until(c, `(() => { const col = document.querySelector('[data-node="c-next"] .sh-notes').getBoundingClientRect(); const prev = document.querySelector('[data-node="c-home"]').getBoundingClientRect(); return col.left >= prev.right - 0.5 })()`, 15_000)
+    await wait(1500)
+    const closed = JSON.parse(await (await fetch(`${ORIGIN}/__mv/api/boards/closed`)).text())
+    const cat = (k: string) => closed.board.nodes.find((n: any) => n.key === k)
+    expect(cat('c-next').x - cat('c-home').x).toBeGreaterThanOrEqual(390 + 260 + 24)
+    rmSync(join(root, 'design', 'scenes', 'app', 'next.note.md'))
+    await browser.until(s, `document.querySelectorAll('[data-node="r-next"] .sh-notes').length === 0`, 15_000)
+    expect(log).not.toMatch(/error/i)
+  }, 60_000)
 
   it('a hostile note is inert in the shell realm: script, handlers and foreign tags never reach the DOM', async () => {
     if (!browser) return

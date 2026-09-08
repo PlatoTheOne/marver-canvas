@@ -40,6 +40,31 @@ export function sceneNoteHost(
   return best ? (best as { key: string }).key : null
 }
 
+/** True when a note has no room: another node stands inside the reserve in front of a noted
+ *  node (its own note, or the scene's note it hosts). Room is the layout's job, never the
+ *  author's - a board with a recipe re-applies it when this is true, so a note file can land
+ *  on a saved board and the frames make way. */
+export function notesCramped(
+  nodes: readonly { key: string; frame: string; x: number; y: number; w: number; h: number; missing?: boolean }[],
+  manifest: { frames: { id: string; scene: string; note?: string }[]; scenes: { name: string; note?: string }[] } | null,
+): boolean {
+  if (!manifest) return false
+  const entry = (id: string) => manifest.frames.find((f) => f.id === id)
+  const live = nodes.filter((n) => !n.missing)
+  const hosts = new Set<string>()
+  for (const s of manifest.scenes) {
+    if (!s.note) continue
+    const h = sceneNoteHost(live, (id) => entry(id)?.scene, s.name)
+    if (h) hosts.add(h)
+  }
+  return live.some((n) => {
+    const r = noteReserve(!!entry(n.frame)?.note, hosts.has(n.key))
+    if (!r) return false
+    const x0 = n.x - r
+    return live.some((o) => o !== n && o.x < n.x && o.x + o.w > x0 && o.y < n.y + n.h && o.y + o.h > n.y)
+  })
+}
+
 // ---- per-viewer visibility -------------------------------------------------------------
 
 const STORAGE = 'mv-notes'

@@ -20,6 +20,12 @@ links jump to a frame; `http(s)` links open a new tab; images come from `design/
 inert. A scene note is 380 wide, a frame note 260; when a frame has both, they stack in one column,
 scene first. An edit lands on the canvas as you save, without reloading the frame.
 
+The room is the layout's job. Every layout the shell composes (a board's `layout` recipe, the auto
+board, tidy, device views) reserves the note's width in front of its frame, and a note landing on a
+board already composed re-applies the recipe so the frames make way - whether the board is open at
+the time or not. Nobody moves frames for a note. A board dragged by hand keeps its positions; `t`
+makes the room there.
+
 ## Diagrams
 
 A ```mermaid fence renders hand-sketched on the paper: rough boxes, hatched fills, handwriting
