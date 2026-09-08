@@ -223,12 +223,21 @@ describe('sticky notes on the canvas', () => {
     writeFileSync(join(root, 'design', 'scenes', 'app', 'home.note.md'), NOTE.replace('Why the jobs list leads', 'Why the list leads now'))
     await browser.until(s, `document.querySelector('[data-node="n-home"] [data-sticky="frame"] h2')?.textContent === 'Why the list leads now'`, 15_000)
     expect(await browser.eval(s, `document.querySelector('[data-node="n-home"] iframe').__mvSame === true`)).toBe(true)
+    // a scene note edit rides sh:scenes; a NEW note file on a frame that had none brings its column
+    writeFileSync(join(root, 'design', 'scenes', 'app', '_note.md'), `# App, renamed\n\nStill three screens.\n`)
+    await browser.until(s, `document.querySelector('[data-node="n-home"] [data-sticky="scene"] h1')?.textContent === 'App, renamed'`, 15_000)
+    writeFileSync(join(root, 'design', 'scenes', 'app', 'next.note.md'), `The second screen.`)
+    await browser.until(s, `document.querySelector('[data-node="n-next"] [data-sticky="frame"] p')?.textContent === 'The second screen.'`, 15_000)
+    expect(await browser.eval(s, `document.querySelector('[data-node="n-home"] iframe').__mvSame === true`)).toBe(true)
+    rmSync(join(root, 'design', 'scenes', 'app', 'next.note.md'))
+    await browser.until(s, `document.querySelectorAll('[data-node="n-next"] .sh-notes').length === 0`, 15_000)
     expect(log).not.toMatch(/error/i)
   })
 
   it('a published canvas carries the notes: column, diagram and the note’s image, no dev server', async () => {
     if (!browser) return
     writeFileSync(join(root, 'design', 'scenes', 'app', 'home.note.md'), NOTE.replace('Why the jobs list leads', 'Why the list leads now'))   // order-independent: the text this test expects
+    writeFileSync(join(root, 'design', 'scenes', 'app', '_note.md'), `# App\n\nThe driver's day, three screens.\n`)
     writeFileSync(join(root, 'design', 'publish.json'), JSON.stringify({ version: 2, boards: { notes: 'comment' } }))
     const out = execFileSync(process.execPath, [CLI, 'build', '--root', root, '--no-textures'], { stdio: 'pipe', encoding: 'utf8' })
     expect(out).not.toMatch(/error/i)
