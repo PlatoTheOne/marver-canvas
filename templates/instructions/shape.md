@@ -222,9 +222,27 @@ flowchart LR
 ```
 ````
 
-Diagrams at note width: flowchart, sequence, state, class, ER, pie and mindmap read well in
-260 or 380 px. Gantt, journey, timeline, quadrant and git graphs are drawn at the note's width
-too but are wide by nature - keep them to a handful of items, or give them a content frame.
+### Diagrams in a note
+
+A ```mermaid fence in a note renders hand-sketched on the yellow paper: rough boxes, hatched
+fills, handwriting labels, one ink. You write plain mermaid and nothing else - no `%%{init}%%`,
+no theme, no colours, no `style` lines (the note has one look and applies it to every family),
+no URLs or images in the source (refused). Every family works: flowchart, sequence, state,
+class, ER, pie, mindmap, timeline, gantt, journey, quadrant, git graph, block.
+
+Fit the note: flowchart (`TD` for a tall note, `LR` for three or four steps), sequence, state,
+class, ER, pie and mindmap read well at 260 or 380 wide. Gantt, journey, timeline, quadrant and
+git graphs are drawn at the note's width too but are wide by nature - keep them to a handful of
+items, or give them a content frame. Five to eight nodes is the sweet spot; short labels
+(two or three words); one diagram per note, above or below the prose it explains.
+
+```mermaid
+sequenceDiagram
+  participant D as Driver
+  participant G as Gate
+  D->>G: scan gate code
+  G-->>D: bay + lot map
+```
 
 Keep it an aside: a screen's worth of reading at most. The spec, the flow, the mood board stay
 content frames - a note explains, it does not document. Every viewer can fold a note to its

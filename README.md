@@ -8,7 +8,7 @@
 
 Screens, prototypes, specs, and now slide decks - all real code, all on one canvas, all shareable with people who sign in as themselves.
 
-[marver.design](https://marver.design) · [Slides](docs/slides.md) · [Live Jam](docs/live-jam.md) · [Deploying a canvas](docs/publish.md) · [Sharing](docs/sharing.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Issues](https://github.com/TNEP4/marver/issues)
+[marver.design](https://marver.design) · [Slides](docs/slides.md) · [Sticky notes](docs/sticky-notes.md) · [Live Jam](docs/live-jam.md) · [Deploying a canvas](docs/publish.md) · [Sharing](docs/sharing.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Issues](https://github.com/TNEP4/marver/issues)
 
 ## Quickstart
 

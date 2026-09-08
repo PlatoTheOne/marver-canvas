@@ -126,7 +126,8 @@ Report where the request came from: chat requests get chat replies; only comment
   cannot say: what the frame is for, how two variations differ, how a mechanism works, an
   open question. Markdown (headings, lists, tables, emphasis, code), `[text](goto:scene/frame)`
   links that jump to a frame, images from design/assets/, and ```mermaid fences drawn
-  hand-sketched (flowchart, sequence, state, class, ER, pie, mindmap read well at note
+  hand-sketched in the note's own yellow - plain mermaid, any family, no init/theme/style
+  lines, no URLs (flowchart, sequence, state, class, ER, pie, mindmap read well at note
   width; gantt, journey and timeline are wide by nature - few items, or a content frame) -
   raw HTML is inert. Readers comment on a note's text like on a frame element,
   fold it to its corner, hide all with N. An edit lands live without reloading the frame.
