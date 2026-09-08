@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -22,6 +22,8 @@ let server: ChildProcess | null = null
 let browser: Browser | null = null
 let log = ''
 
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64')   // 1x1
+
 const NOTE = `## Why the jobs list leads
 
 Drivers ask "where am I going first", so the list beats the map.
@@ -32,6 +34,8 @@ Compare with the [next screen](goto:app/next): same header, no list.
 flowchart LR
   Login --> Today --> Jobs
 \`\`\`
+
+![the flow](flow.png)
 `
 
 beforeAll(async () => {
@@ -52,6 +56,8 @@ export default () => <main style={{ minHeight: '100vh', background: '${bg}' }}><
   writeFileSync(join(scene, 'next.tsx'), frame('Next', '#05b'))
   writeFileSync(join(scene, 'home.note.md'), NOTE)
   writeFileSync(join(scene, '_note.md'), `# App\n\nThe driver's day, three screens.\n`)
+  mkdirSync(join(root, 'design', 'assets'), { recursive: true })
+  writeFileSync(join(root, 'design', 'assets', 'flow.png'), PNG)
   const boards = join(root, 'design', 'boards')
   mkdirSync(boards, { recursive: true })
   writeFileSync(join(boards, 'notes.json'), JSON.stringify({ version: 1, name: 'notes', auto: false, nodes: [
@@ -219,4 +225,25 @@ describe('sticky notes on the canvas', () => {
     expect(await browser.eval(s, `document.querySelector('[data-node="n-home"] iframe').__mvSame === true`)).toBe(true)
     expect(log).not.toMatch(/error/i)
   })
+
+  it('a published canvas carries the notes: column, diagram and the note’s image, no dev server', async () => {
+    if (!browser) return
+    writeFileSync(join(root, 'design', 'scenes', 'app', 'home.note.md'), NOTE.replace('Why the jobs list leads', 'Why the list leads now'))   // order-independent: the text this test expects
+    writeFileSync(join(root, 'design', 'publish.json'), JSON.stringify({ version: 2, boards: { notes: 'comment' } }))
+    const out = execFileSync(process.execPath, [CLI, 'build', '--root', root, '--no-textures'], { stdio: 'pipe', encoding: 'utf8' })
+    expect(out).not.toMatch(/error/i)
+    expect(out).toMatch(/frames|built|dist/i)   // a real build ran, not a no-op
+    const port = PORT + 1
+    const served = spawn(process.execPath, [CLI, 'serve', '--port', String(port)], { cwd: root, stdio: 'pipe', env: { ...process.env, MARVER_DATA_DIR: '', MARVER_PASSWORD: '', MARVER_ID_ISSUER: '' } })
+    try {
+      const t0 = Date.now()
+      while (Date.now() - t0 < 30_000) { if (await fetch(`http://localhost:${port}/`).then((r) => r.ok, () => false)) break; await wait(200) }
+      const s = await browser.tab({ width: 1500, height: 950 })
+      await browser.go(s, `http://localhost:${port}/#/b/notes`)
+      await browser.until(s, `document.querySelectorAll('[data-node="n-home"] .sh-notes .sh-sticky').length === 2 && !!document.querySelector('[data-node="n-home"] .sh-sticky-diagram svg')`, 30_000)
+      await browser.until(s, `(document.querySelector('[data-node="n-home"] .sh-sticky-body img')?.naturalWidth ?? 0) > 0`, 15_000)
+      const state = await browser.eval(s, `(() => ({ src: document.querySelector('[data-node="n-home"] .sh-sticky-body img').getAttribute('src'), h2: document.querySelector('[data-node="n-home"] [data-sticky="frame"] h2').textContent, scene: document.querySelector('[data-node="n-home"] [data-sticky="scene"] h1').textContent }))()`)
+      expect(state).toEqual({ src: '/design/assets/flow.png', h2: 'Why the list leads now', scene: 'App' })
+    } finally { try { served.kill('SIGTERM') } catch { /* gone */ } }
+  }, 120_000)
 })
