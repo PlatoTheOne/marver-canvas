@@ -11,8 +11,9 @@ Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](ht
   neighbour until someone pressed `t`. A board with a recipe (or the auto board) now re-applies
   its layout when a note has no room - as the file lands while the board is open, and at load
   when it landed while the board was closed - and saves the result. Boards dragged by hand keep
-  their positions, as before. The agent instructions say it plainly: placement is the canvas's
-  job, write the file.
+  their positions, as before. A deleted frame's card counts as an obstacle; a drag inside the
+  reflow's debounce is never overwritten. The agent instructions say it plainly: placement is
+  the canvas's job, write the file.
 
 ## 0.19.0 - 2026-09-08
 

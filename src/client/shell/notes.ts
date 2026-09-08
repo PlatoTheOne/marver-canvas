@@ -40,10 +40,15 @@ export function sceneNoteHost(
   return best ? (best as { key: string }).key : null
 }
 
-/** True when a note has no room: another node stands inside the reserve in front of a noted
- *  node (its own note, or the scene's note it hosts). Room is the layout's job, never the
- *  author's - a board with a recipe re-applies it when this is true, so a note file can land
- *  on a saved board and the frames make way. */
+/** The node header the canvas draws above a frame body (FrameNode's HEADER) - a node's card is
+ *  `h + NODE_HEADER` tall, and that is the height a note beside it has to clear. */
+export const NODE_HEADER = 28
+
+/** True when a note has no room: another node's card stands inside the reserve in front of a
+ *  noted node (its own note, or the scene's note it hosts). Room is the layout's job, never the
+ *  author's - a board the shell composes re-applies its layout when this is true, so a note file
+ *  can land on a saved board and the frames make way. Missing nodes (a deleted frame's card, still
+ *  drawn full size) block room but never host a note. */
 export function notesCramped(
   nodes: readonly { key: string; frame: string; x: number; y: number; w: number; h: number; missing?: boolean }[],
   manifest: { frames: { id: string; scene: string; note?: string }[]; scenes: { name: string; note?: string }[] } | null,
@@ -60,8 +65,8 @@ export function notesCramped(
   return live.some((n) => {
     const r = noteReserve(!!entry(n.frame)?.note, hosts.has(n.key))
     if (!r) return false
-    const x0 = n.x - r
-    return live.some((o) => o !== n && o.x < n.x && o.x + o.w > x0 && o.y < n.y + n.h && o.y + o.h > n.y)
+    const x0 = n.x - r, y1 = n.y + n.h + NODE_HEADER
+    return nodes.some((o) => o !== n && o.x < n.x && o.x + o.w > x0 && o.y < y1 && o.y + o.h + NODE_HEADER > n.y)
   })
 }
 

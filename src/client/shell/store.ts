@@ -411,17 +411,32 @@ export const useStore = create<State>((set, get) => {
   // One cancelable, BOARD-SCOPED reflow after content measurements settle.
   // The captured board name is the generation guard - a debounce surviving a board
   // switch fires into a name check and dies, never touching the new board.
+  // `onlyIf` (a note asking for room) is re-judged when the timer fires - a drag or a restore
+  // in the meantime may have settled it - and never downgrades an unconditional reflow pending.
   let reflowTimer: ReturnType<typeof setTimeout> | undefined
-  const scheduleReflow = () => {
+  let reflowCheck: (() => boolean) | null = null
+  const scheduleReflow = (onlyIf?: () => boolean) => {
     const boardAt = get().board
+    reflowCheck = reflowTimer !== undefined && reflowCheck === null ? null : (onlyIf ?? null)
     clearTimeout(reflowTimer)
     reflowTimer = setTimeout(() => {
+      reflowTimer = undefined
+      const check = reflowCheck
+      reflowCheck = null
       const s = get()
       if (s.board !== boardAt) return
-      if (s.gesture) { scheduleReflow(); return }   // defer, never drop - retries after the drag
-      if (s.layout || s.sceneRows?.length) s.runTidy()
+      if (s.gesture) { scheduleReflow(check ?? undefined); return }   // defer, never drop - retries after the drag
+      if (check && !check()) return
+      if (composed(s)) s.runTidy()
     }, 400)
   }
+  /** Boards whose layout the shell owns: a recipe, scene rows, or the auto board. Room for a
+   *  note is made here; a board the human placed by hand is never moved (spec 18, 0.19.1). */
+  const composed = (s: { layout: BoardLayout | null; sceneRows: string[][] | null; boardAuto: boolean }) => !!(s.layout || s.sceneRows?.length || s.boardAuto)
+  const cramped = () => { const s = get(); return !!s.manifest && notesCramped(s.nodes, s.manifest) }
+  /** A note may have landed with no room (a frame note via the manifest, a scene note via
+   *  sh:scenes, either merged late by boot/switch): a composed board re-applies its layout. */
+  const roomForNotes = () => { if (composed(get()) && cramped()) scheduleReflow(cramped) }
 
   /** Theme resolution ladder: user pin > the frame's declared meta.theme > viewTheme. */
   const resolveTheme = (frame?: FrameEntry, user?: string) => user ?? frame?.theme ?? get().viewTheme
@@ -630,7 +645,7 @@ export const useStore = create<State>((set, get) => {
       }
       // a note that landed while this board was closed has no room in the saved positions:
       // a board with a recipe re-applies it (spec 18 - room is the layout's job)
-      const cramped = !!boardHash && !needTidy && !!(layout || sceneRows?.length) && notesCramped(nodes, manifest)
+      const cramped = !!boardHash && !needTidy && !!(layout || sceneRows?.length || boardAuto) && notesCramped(nodes, manifest)
       if ((!boardHash || needTidy || cramped) && nodes.length) {
         const placedAll = tidy(tidyInput(nodes, manifest), effectiveLayout(layout, sceneRows), layoutWarn)
         for (const pl of placedAll) { const n = nodes.find((x) => x.key === pl.key)!; n.x = pl.x; n.y = pl.y }
@@ -667,6 +682,7 @@ export const useStore = create<State>((set, get) => {
       if (next.dirty) scheduleSave()          // load-time prune must reach the disk
       if (live && manifestKey(live) !== manifestKey(next.manifest as Manifest)) get().applyManifest(live)
       else if (scenesRev !== scenesAtStart && liveScenes) set({ manifest: { ...get().manifest!, scenes: liveScenes } })   // an sh:scenes that landed mid-fetch outranks the file we read
+      roomForNotes()                          // whichever way the notes arrived, they get their room
       return true
     },
 
@@ -701,6 +717,7 @@ export const useStore = create<State>((set, get) => {
       if (next.dirty) scheduleSave()           // load-time prune must reach the disk
       if (live && manifestKey(live) !== manifestKey(next.manifest as Manifest)) get().applyManifest(live)
       else if (scenesRev !== scenesAtStart && liveScenes) set({ manifest: { ...get().manifest!, scenes: liveScenes } })
+      roomForNotes()
     },
 
     renameBoard(name, title, baseHash) {
@@ -753,9 +770,7 @@ export const useStore = create<State>((set, get) => {
       liveScenes = scenes
       const m = get().manifest
       if (m) set({ manifest: { ...m, scenes } })   // before the first manifest: kept for the boot's commit
-      // a scene note arrived: a recipe board makes room for it beside the scene's first frame
-      const s = get()
-      if (s.manifest && (s.layout || s.sceneRows?.length) && notesCramped(s.nodes, s.manifest)) scheduleReflow()
+      roomForNotes()                         // a scene note arrived: room beside the scene's first frame
     },
 
     // The whole sidebar tree in one write: order, membership, the folders themselves. The
@@ -878,8 +893,7 @@ export const useStore = create<State>((set, get) => {
         ...(changed ? { dirty: true, baseLayout: nextBase } : {}),
       }))
       if (changed) scheduleSave()
-      // a note file arrived (or grew onto a frame): a recipe board makes room for it
-      if ((get().layout || get().sceneRows?.length) && notesCramped(final, m)) scheduleReflow()
+      roomForNotes()                         // a frame note file arrived: room in front of its frame
     },
 
     removeNode(key) {

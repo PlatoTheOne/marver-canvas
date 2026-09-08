@@ -7,7 +7,7 @@ import { markdownImageRefs, publishedManifest } from '../src/server/build.ts'
 import { renderMarkdown } from '../src/client/content/md.ts'
 import { guardDiagramSource } from '../src/client/content/diagram.tsx'
 import { tidy } from '../src/client/shell/tidy.ts'
-import { NOTE_GAP, NOTE_W, SCENE_NOTE_W, noteReserve, notesCramped, sceneNoteHost } from '../src/client/shell/notes.ts'
+import { NODE_HEADER, NOTE_GAP, NOTE_W, SCENE_NOTE_W, noteReserve, notesCramped, sceneNoteHost } from '../src/client/shell/notes.ts'
 
 // Sticky notes (spec 18): a markdown file beside the thing it explains reaches the manifest as
 // `note`, the layout keeps room for it, and the shell knows which node shows a scene's.
@@ -196,21 +196,36 @@ describe('room for a note is the layout’s job', () => {
   ]
   it('a frame note is cramped when its left neighbour stands inside the reserve, and not once tidy made room', () => {
     expect(notesCramped(row(500), manifest({ frame: true }))).toBe(true)
-    expect(notesCramped(row(390 + noteReserve(true, false)), manifest({ frame: true }))).toBe(false)
     expect(notesCramped(row(500), manifest({}))).toBe(false)                           // no note, no reserve
     expect(notesCramped(row(500), null)).toBe(false)
+    // tidy's own output, with the reserve it keeps, never reads cramped
+    const m = manifest({ frame: true })
+    const placed = tidy(row(500).map((n) => ({ key: n.key, frame: n.frame, scene: n.frame.split('/')[0], w: n.w, h: n.h + NODE_HEADER, noteW: noteReserve(n.key === 'b', false) })))
+    const tidied = row(500).map((n) => { const p = placed.find((x) => x.key === n.key)!; return { ...n, x: p.x, y: p.y } })
+    expect(notesCramped(tidied, m)).toBe(false)
+    expect(tidied.find((n) => n.key === 'b')!.x - tidied.find((n) => n.key === 'a')!.x).toBeGreaterThanOrEqual(390 + NOTE_W + NOTE_GAP)
   })
-  it('a scene note counts on its host only; nodes in another row and missing nodes never cramp', () => {
+  it('a node’s card is its body plus the header: a neighbour ending inside the header band still cramps', () => {
+    const under = [{ ...row(500)[0] }, { ...row(500)[1], x: 500, y: 844 + 6 }, row(500)[2]]   // `a` ends at 844 + 28 = 872, `b` starts at 850
+    expect(notesCramped(under, manifest({ frame: true }))).toBe(true)
+    const clear = [{ ...row(500)[0] }, { ...row(500)[1], x: 500, y: 844 + NODE_HEADER + 1 }, row(500)[2]]
+    expect(notesCramped(clear, manifest({ frame: true }))).toBe(false)
+  })
+  it('a scene note counts on its host only; a deleted frame’s card blocks room but never hosts', () => {
     // the scene note sits on `a` (first in reading order) whose left is free: not cramped
     expect(notesCramped(row(500), manifest({ scene: true }))).toBe(false)
     // move `a` under `b`: `b` hosts the scene note, `a` is in another row - still free
     const stacked = [{ ...row(500)[0], y: 1200 }, row(500)[1], row(500)[2]]
     expect(notesCramped(stacked, manifest({ scene: true }))).toBe(false)
-    // a node at x:300 in front of the host `b` (host by y, then x) is inside the 404 reserve
-    const front = [{ ...row(500)[0], x: 300, y: 0 }, { ...row(500)[1], x: 500, y: 0, key: 'b' }, row(500)[2]]
+    const front = [{ ...row(500)[0], x: 300, y: 0 }, { ...row(500)[1], x: 500, y: 0 }, row(500)[2]]
     expect(notesCramped(front, manifest({ scene: true }))).toBe(false)               // `a` at 300 is the host, free on its left
     const hostB = [{ ...row(500)[0], x: 300, y: 5 }, { ...row(500)[1], x: 500, y: 0 }, row(500)[2]]
     expect(notesCramped(hostB, manifest({ scene: true }))).toBe(true)                // `b` (y 0) hosts; `a` stands in its reserve
-    expect(notesCramped([{ ...hostB[0], missing: true }, hostB[1], hostB[2]], manifest({ scene: true }))).toBe(false)
+    // `a` deleted: its card is still drawn full size, so it still blocks - but it no longer hosts,
+    // so with the scene note only, `b` hosts and `a` cramps it; with nothing noted, nothing does
+    const gone = [{ ...hostB[0], missing: true }, hostB[1], hostB[2]]
+    expect(notesCramped(gone, manifest({ scene: true }))).toBe(true)
+    expect(notesCramped([{ ...row(500)[0], missing: true }, row(500)[1], row(500)[2]], manifest({ frame: true }))).toBe(true)
+    expect(notesCramped([{ ...row(500)[0], missing: true }, row(500)[1], row(500)[2]], manifest({}))).toBe(false)
   })
 })
