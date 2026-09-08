@@ -152,21 +152,23 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
       if (e.source !== win || e.origin !== location.origin || e.data?.type !== 'sh:anchor-rects') return
       const next: typeof rects = {}
       for (const r of e.data.rects ?? []) next[r.key] = r.orphan ? null : r.rect
-      setRects((prev) => ({ ...noteOnly(prev), ...next }))
+      setRects(next)
     }
     window.addEventListener('message', onMsg)
     ask()
     const iv = setInterval(ask, 4000)          // re-renders, scroll, hot reloads - cheap to re-ask
     return () => { clearInterval(iv); window.removeEventListener('message', onMsg) }
   }, [node.status, inFrame.map((t) => t.id).join(','), iframe])
-  const noteOnly = (r: typeof rects) => Object.fromEntries(Object.entries(r).filter(([id]) => onNote.some((t) => t.id === id)))
-  // note anchors: measured in the shell, in node-body coordinates (negative x - the note is
-  // left of the frame). A folded column parks its pins on the fold; a note whose file is gone,
-  // or whose element the markdown no longer has, parks like an orphan. Re-measured on every
-  // fold/unfold (twice: at once and past the transition) and on the same 4 s beat as the frame.
+  // note anchors: their own map, measured in the shell, in node-body coordinates (negative x -
+  // the note is left of the frame). The composing draft is measured too (key 'draft'), so it
+  // follows a fold like a saved pin. A folded column parks pins on the fold; a note whose file
+  // is gone, or whose element the markdown no longer has, parks like an orphan. Re-measured on
+  // every fold/unfold (twice: at once and past the transition) and on the same 4 s beat.
+  const [noteRects, setNoteRects] = useState<typeof rects>({})
   const notesState = useNotes()
+  const draftOnNote = draft?.nodeKey === node.key && isNoteAnchor(draft.anchor) ? draft.anchor : null
   useEffect(() => {
-    if (!onNote.length) return
+    if (!onNote.length && !draftOnNote) { setNoteRects((r) => (Object.keys(r).length ? {} : r)); return }
     const measure = () => {
       const host = document.querySelector(`[data-node="${CSS.escape(node.key)}"]`) as HTMLElement | null
       const origin = host?.querySelector('.cm-layer')?.getBoundingClientRect()
@@ -175,22 +177,25 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
       const toBody = (r: DOMRect) => ({ x: (r.left - origin.left) / s, y: (r.top - origin.top) / s, w: r.width / s, h: r.height / s })
       const column = host.querySelector('.sh-notes')
       const fold = column?.querySelector('.sh-notes-fold')
-      const next: typeof rects = {}
-      for (const t of onNote) {
-        const a = t.anchor as any
+      const place = (a: any) => {
         const body = column?.querySelector(`[data-sticky="${a.el.note}"] .sh-sticky-body`)
-        if (!body) { next[t.id] = null; continue }
-        if (column!.classList.contains('off')) { next[t.id] = fold ? toBody(fold.getBoundingClientRect()) : null; continue }
+        if (!body) return null
+        if (column!.classList.contains('off')) return fold ? toBody(fold.getBoundingClientRect()) : null
         const el = resolveNoteAnchor(a, body)
-        next[t.id] = el ? toBody(el.getBoundingClientRect()) : null
+        return el ? toBody(el.getBoundingClientRect()) : null
       }
-      setRects((prev) => ({ ...prev, ...next }))
+      const next: typeof rects = {}
+      for (const t of onNote) next[t.id] = place(t.anchor)
+      if (draftOnNote) next.draft = place(draftOnNote)
+      setNoteRects(next)
     }
     measure()
     const late = setTimeout(measure, 260)
     const iv = setInterval(measure, 4000)
     return () => { clearTimeout(late); clearInterval(iv) }
-  }, [onNote.map((t) => t.id).join(','), notesState.all, notesState.hidden.join(','), node.key, node.w, node.h])
+  }, [onNote.map((t) => t.id).join(','), draftOnNote, notesState.all, notesState.hidden.join(','), node.key, node.w, node.h])
+  /** This node's sticky column when it is showing: the docked card must clear it (world px). */
+  const noteColumn = (): HTMLElement | null => document.querySelector(`[data-node-notes="${CSS.escape(node.key)}"]:not(.off)`)
 
   // #4/#5: drive the persistent element highlight into this frame - the composing draft on
   // this node (lock on pick), or the open thread anchored here (highlight on open). null
@@ -226,7 +231,7 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
   // badge is widest, the working shimmer next. Reactive, so a job starting mid-read adjusts.
   const flankBadge = useStore((s) => !!s.frameFor(node)?.variantGroup)
   const flankShim = useStore((s) => s.working.includes(frameId))
-  const flankNote = useStore((s) => { const f = s.frameFor(node); return !!f?.note || !!(f && s.manifest?.scenes.find((sc) => sc.name === f.scene)?.note) })
+  // (a sticky column is read from the DOM at render: it is per viewer and per host node)
   const drafting = draft?.nodeKey === node.key
   const alertIds = useMentionAlerts()
   if (!show || (!open.length && !drafting)) return null
@@ -244,7 +249,7 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
 
   const pinPos = (t: Thread) => {
     const a = t.anchor as any
-    const r = rects[t.id]
+    const r = isNoteAnchor(a) ? noteRects[t.id] : rects[t.id]
     if (a?.el && r) return { x: r.x + (a.pos?.fx ?? 0.5) * r.w, y: r.y + (a.pos?.fy ?? 0.5) * r.h, orphan: false }
     if (a?.el && r === null) return { x: node.w - 16, y: 16, orphan: true }         // orphan parks top-right
     const p = a?.pos                                                                // frame-level: stored fraction of the frame
@@ -268,7 +273,9 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
           return r.left < rx + W && r.right > rx && r.top < rect.bottom && r.bottom > rect.top
         })
       }
-      const room = (s: 'l' | 'r') => (s === 'r' ? window.innerWidth - rect.right : rect.left) >= W + GAP
+      // a showing sticky column sits in the left gutter: the card must fit BEYOND it
+      const gutter = noteColumn()?.getBoundingClientRect().width ?? 0
+      const room = (s: 'l' | 'r') => (s === 'r' ? window.innerWidth - rect.right : rect.left - (gutter ? gutter + 12 : 0)) >= W + GAP
       const prefer: ('l' | 'r')[] = pinPos(activeThread2).x < node.w / 2 ? ['l', 'r'] : ['r', 'l']
       return prefer.find((s) => room(s) && !occupied(s)) ?? prefer.find(room) ?? prefer[0]
     }
@@ -293,9 +300,13 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
       })}
       {activeThread2 && (
         <ThreadCard key={active} thread={activeThread2} at={pinPos(activeThread2)} bounds={{ w: node.w, h: node.h }} nodeKey={node.key} side={cardSide}
-          flank={cardSide === 'l' ? (flankNote ? 'note' : flankBadge ? 'badge' : flankShim ? 'shim' : null) : null} />
+          flank={cardSide === 'l' ? (noteColumn() ? 'note' : flankBadge ? 'badge' : flankShim ? 'shim' : null) : null} />
       )}
-      {draft?.nodeKey === node.key && <DraftComposer at={{ x: ((draft.anchor as any)?.rect?.x ?? 0) + ((draft.anchor as any)?.pos?.fx ?? 0.5) * ((draft.anchor as any)?.rect?.w ?? 0), y: ((draft.anchor as any)?.rect?.y ?? 0) + ((draft.anchor as any)?.pos?.fy ?? 0.5) * ((draft.anchor as any)?.rect?.h ?? 0) }} bounds={{ w: node.w, h: node.h }} hue={anchorHue(draft.anchor)} />}
+      {draft?.nodeKey === node.key && (() => {
+        const a = draft.anchor as any
+        const r = (draftOnNote && noteRects.draft) || a?.rect
+        return <DraftComposer at={{ x: (r?.x ?? 0) + (a?.pos?.fx ?? 0.5) * (r?.w ?? 0), y: (r?.y ?? 0) + (a?.pos?.fy ?? 0.5) * (r?.h ?? 0) }} bounds={{ w: node.w, h: node.h }} hue={anchorHue(draft.anchor)} />
+      })()}
     </>
   )
 }

@@ -14,8 +14,8 @@
  * navigates (the bridge rule).
  */
 import { memo, useEffect, useMemo, useRef } from 'react'
-import { renderMarkdown } from '../../content/md.ts'
-import { sanitizeSvg } from '../../content/diagram.tsx'
+import { renderMarkdown, sanitizeMarkdownHtml } from '../../content/md.ts'
+import { guardDiagramSource, sanitizeSvg } from '../../content/diagram.tsx'
 import { useComments } from '../comments-store.ts'
 import { goTo } from '../goto.ts'
 import { NOTE_W, SCENE_NOTE_W, noteAnchor, noteVisible, useNotes, type NoteKind } from '../notes.ts'
@@ -27,7 +27,7 @@ const HAND_FONT = `"Segoe Print", "Bradley Hand", "Chalkboard SE", "Comic Sans M
 /** Yellow paper for the hand-drawn look - the same values the sheet paints the sticky with. */
 const PAPER = { bg: '#fff3a3', ink: '#2b2500', line: '#6b5a00', soft: '#ffe680', pale: '#fffbdc' }
 const THEME_VARS = {
-  background: PAPER.bg, fontFamily: HAND_FONT, fontSize: '14px',
+  background: PAPER.bg, fontFamily: HAND_FONT, fontSize: '17px',
   primaryColor: PAPER.soft, primaryTextColor: PAPER.ink, primaryBorderColor: PAPER.line,
   secondaryColor: PAPER.pale, secondaryTextColor: PAPER.ink, secondaryBorderColor: PAPER.line,
   tertiaryColor: PAPER.pale, tertiaryTextColor: PAPER.ink, tertiaryBorderColor: PAPER.line,
@@ -48,15 +48,19 @@ async function renderDiagrams(body: HTMLElement, alive: () => boolean) {
   if (!fences.length) return
   const mermaid = (await import('mermaid')).default
   if (!alive()) return
-  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base', look: 'handDrawn', themeVariables: THEME_VARS, fontFamily: HAND_FONT })
+  mermaid.initialize({
+    startOnLoad: false, securityLevel: 'strict', theme: 'base', look: 'handDrawn', themeVariables: THEME_VARS, fontFamily: HAND_FONT,
+    // legible at sticky size: heavier text, thicker strokes than the default hand-drawn look
+    themeCSS: `.nodeLabel, .edgeLabel, .label, text, tspan { font-weight: 700 !important; letter-spacing: .01em } .edgePath path, .flowchart-link { stroke-width: 2px } .node path, .node rect { stroke-width: 1.6px } .messageText, .actor { font-weight: 700 !important }`,
+    flowchart: { padding: 10, nodeSpacing: 32, rankSpacing: 36 },
+  })
   for (const code of fences) {
     const pre = code.parentElement!
     const src = code.textContent ?? ''
     const host = document.createElement('div')
     host.className = 'sh-sticky-diagram'
     try {
-      // the zero-external-request boundary (the Diagram block's): image shapes fetch during render
-      if (/(?:\w+:)?\/\//.test(src)) throw new Error('URLs are not allowed in diagram source')
+      guardDiagramSource(src)   // the zero-external-request boundary (the Diagram block's)
       const { svg } = await mermaid.render(`sh-note-d${++diagramSeq}`, src)
       if (!alive()) return
       host.innerHTML = sanitizeSvg(svg)
@@ -71,7 +75,7 @@ async function renderDiagrams(body: HTMLElement, alive: () => boolean) {
 
 function StickyBody({ text, kind, nodeKey, frameId }: { text: string; kind: NoteKind; nodeKey: string; frameId: string }) {
   const ref = useRef<HTMLDivElement>(null)
-  const html = useMemo(() => renderMarkdown(text), [text])
+  const html = useMemo(() => sanitizeMarkdownHtml(renderMarkdown(text)), [text])
   useEffect(() => {
     const el = ref.current
     if (!el) return

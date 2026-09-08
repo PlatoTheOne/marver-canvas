@@ -22,6 +22,7 @@ import { NAME, ROUTE } from '../cli/name.ts'
 import { loadConfig } from './config.ts'
 import { detectHost } from './detect.ts'
 import { scanFrames, type FrameEntry, type Manifest } from './manifest.ts'
+import { Marked } from 'marked'
 import { marverPlugin, tailwind3Css, tailwind4Plugin } from './plugin.ts'
 import { cssFixPlugin } from './css-fix.ts'
 import { buildTree, flatten, isBoardName, type FolderRow, type TreeItem } from '../shared/board-tree.ts'
@@ -76,9 +77,29 @@ export function scanAssetRefs(src: string, moduleId: string): string[] {
   return out
 }
 
-/** Markdown image literals in prose: `![alt](path)`. Md content inside frames and sticky notes alike. */
+/** Markdown images in prose, through the parser: inline and reference-style, titles and
+ *  parentheses in paths handled, code never counted. Decoded the way the client's assetUrl
+ *  decodes (one pass; a path still carrying `%` is refused there and skipped here). Md content
+ *  inside frames and sticky notes alike. */
 export function markdownImageRefs(md: string): string[] {
-  return [...md.matchAll(/!\[[^\]]*\]\(([^)\s"']+)\)/g)].map((m) => m[1])
+  const out: string[] = []
+  const walk = (tokens: any[]) => {
+    for (const t of tokens) {
+      if (t.type === 'image' && typeof t.href === 'string') {
+        let p = t.href.trim()
+        try { p = decodeURIComponent(p) } catch { continue }
+        if (!p.includes('%')) out.push(p)
+      }
+      if (t.type !== 'code' && t.type !== 'codespan') {
+        if (Array.isArray(t.tokens)) walk(t.tokens)
+        if (Array.isArray(t.items)) walk(t.items)
+        if (Array.isArray(t.rows)) for (const row of t.rows) walk(row.map((c: any) => ({ tokens: c.tokens })))
+        if (Array.isArray(t.header)) walk(t.header.map((c: any) => ({ tokens: c.tokens })))
+      }
+    }
+  }
+  try { walk(new Marked({ gfm: true }).lexer(md)) } catch { /* unparseable prose has no images */ }
+  return out
 }
 
 /** Same shape the client's assetUrl accepts: relative, inside design/assets/, no tricks. */

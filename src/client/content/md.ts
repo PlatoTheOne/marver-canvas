@@ -38,6 +38,12 @@ const marked = new Marked({
   renderer: {
     // raw HTML (block or inline) renders as its literal text - inert by construction
     html(token: any) { return escapeHtml(String(token.text ?? '')) },
+    // marked leaves the text INSIDE a raw block (<script>, <style>, <pre>, <textarea>) unescaped
+    // (`token.escaped`); here every text token is escaped - there is no raw block to serve
+    text(token: any) {
+      if (token.tokens) return this.parser.parseInline(token.tokens)
+      return escapeHtml(String(token.text ?? ''))
+    },
     link(token: any) {
       const href = String(token.href ?? '')
       const inner = this.parser.parseInline(token.tokens ?? [])
@@ -76,4 +82,40 @@ marked.use({
 
 export function renderMarkdown(src: string): string {
   return marked.parse(src, { async: false }) as string
+}
+
+// ---- the second gate: an allowlist over the rendered DOM ----------------------------------
+// renderMarkdown is built to emit only these; this pass makes that a property of the OUTPUT,
+// not of every renderer branch - the shell realm (sticky notes) is more privileged than a
+// frame, so the HTML it inserts is checked element by element, attribute by attribute.
+const TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'strong', 'em', 'del', 's', 'a', 'img', 'hr', 'br', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'span', 'input', 'div', 'sup', 'sub'])
+const ATTRS: Record<string, (v: string) => boolean> = {
+  href: (v) => v === '#' || /^https?:\/\//i.test(v) || /^mailto:/i.test(v),
+  'data-goto': (v) => /^[\w./-]+$/.test(v),
+  target: (v) => v === '_blank',
+  rel: (v) => v === 'noopener noreferrer',
+  src: (v) => v.startsWith('/design/assets/') && !v.includes('..'),
+  alt: () => true, title: () => true, loading: (v) => v === 'lazy',
+  class: (v) => /^(mv-[\w-]+|language-[\w-]+)( (mv-[\w-]+|language-[\w-]+))*$/.test(v),
+  align: (v) => /^(left|center|right)$/.test(v),
+  type: (v) => v === 'checkbox', checked: () => true, disabled: () => true,
+  start: (v) => /^\d+$/.test(v), colspan: (v) => /^\d+$/.test(v), rowspan: (v) => /^\d+$/.test(v),
+}
+/** Rendered markdown -> the same HTML with every element and attribute outside the allowlist
+ *  removed (an element goes with its subtree; an attribute alone). Browser only (DOMParser). */
+export function sanitizeMarkdownHtml(html: string): string {
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html')
+  const walk = (el: Element) => {
+    for (const child of [...el.children]) {
+      if (!TAGS.has(child.tagName.toLowerCase())) { child.remove(); continue }
+      for (const a of [...child.attributes]) {
+        const ok = ATTRS[a.name]
+        if (!ok || !ok(a.value)) child.removeAttribute(a.name)
+      }
+      if (child.tagName === 'INPUT') child.setAttribute('disabled', '')
+      walk(child)
+    }
+  }
+  walk(doc.body)
+  return doc.body.innerHTML
 }

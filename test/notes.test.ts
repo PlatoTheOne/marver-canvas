@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NOTE_MAX, isNoteFile, noteFileFor, readNote, scanFrames, sceneNote } from '../src/server/manifest.ts'
 import { markdownImageRefs, publishedManifest } from '../src/server/build.ts'
+import { renderMarkdown } from '../src/client/content/md.ts'
+import { guardDiagramSource } from '../src/client/content/diagram.tsx'
 import { tidy } from '../src/client/shell/tidy.ts'
 import { NOTE_GAP, NOTE_W, SCENE_NOTE_W, noteReserve, sceneNoteHost } from '../src/client/shell/notes.ts'
 
@@ -86,8 +88,31 @@ describe('notes in a published canvas', () => {
     expect(pub.scenes).toEqual([{ name: 'a', frames: 1, note: 'scene note' }])
     expect(pub.frames[0].note).toBe('frame note')
   })
-  it('a note’s images are asset refs like any Md image', () => {
-    expect(markdownImageRefs(`see ![the flow](flows/checkout.png) and ![](x.jpg)`)).toEqual(['flows/checkout.png', 'x.jpg'])
+  it('a note’s images are asset refs like any Md image: titles, parentheses, reference style; never code', () => {
+    expect(markdownImageRefs(`see ![the flow](flows/checkout.png "diagram") and ![](x.jpg)`)).toEqual(['flows/checkout.png', 'x.jpg'])
+    expect(markdownImageRefs(`![v2](flow(v2).png)`)).toEqual(['flow(v2).png'])
+    expect(markdownImageRefs(`![ref][f]\n\n[f]: flows/ref.png`)).toEqual(['flows/ref.png'])
+    expect(markdownImageRefs('example:\n\n```md\n![x](not-an-asset.png)\n```\n\nand `![y](nor-this.png)`')).toEqual([])
+    expect(markdownImageRefs(`- ![in a list](a.png)\n\n| c |\n|---|\n| ![in a table](b.png) |`)).toEqual(['a.png', 'b.png'])
+    expect(markdownImageRefs(`![sp](my%20flow.png)`)).toEqual(['my flow.png'])
+  })
+})
+
+describe('what a note may not do', () => {
+  it('raw HTML is text, including the inside of a <script> block (marked leaves raw-block text unescaped)', () => {
+    const out = renderMarkdown('hi <script><img/src=x onerror=alert(1)></script>')
+    expect(out).not.toMatch(/<img|<script/)
+    expect(out).toContain('&#60;img/src=x onerror=alert(1)&#62;')
+    expect(renderMarkdown('<style>body{}</style>\n\ntext')).not.toMatch(/<style/)
+    expect(renderMarkdown('a <b onclick=x>b</b>')).not.toMatch(/<b/)
+    expect(renderMarkdown('[x](javascript:alert(1))')).toBe('<p>x</p>\n')
+  })
+  it('diagram source cannot name a resource: URL schemes (either slash), protocol-relative, image shapes', () => {
+    expect(() => guardDiagramSource('flowchart LR\n A --> B')).not.toThrow()
+    expect(() => guardDiagramSource('flowchart LR\n A@{ img: "https:\\\\example.invalid/p.png", label: "i" }')).toThrow()
+    expect(() => guardDiagramSource('flowchart LR\n A@{img:"x.png"}')).toThrow()
+    expect(() => guardDiagramSource('graph LR\n A["//cdn/x"]')).toThrow()
+    expect(() => guardDiagramSource('graph LR\n A["http://x"]')).toThrow()
   })
 })
 

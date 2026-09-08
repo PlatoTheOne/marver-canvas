@@ -1274,7 +1274,9 @@ body.sh-hide-ui .sh-play-nav { display: none !important }
    minimum through --sh-inv. Yellow in both shell themes - a sticky is yellow. */
 .sh-node { --note-bg: #fff3a3; --note-bg-2: #ffeb85; --note-ink: #2b2500; --note-dim: rgba(43, 37, 0, .62);
   --note-line: rgba(107, 90, 0, .28); --note-link: #7a4d00; --note-fold: #e9cf5e; --note-fold-2: #c9ae3c }
-.sh-node[data-theme="dark"] { --note-bg: #f3e27e; --note-bg-2: #e9d363; --note-fold: #d4bb4c; --note-fold-2: #a88f2a }
+/* dark canvas: a deeper mustard so the paper reads as paper, not as a highlight; ink darker for contrast */
+.sh-node[data-theme="dark"] { --note-bg: #e6c94f; --note-bg-2: #d6b73c; --note-ink: #1f1a00; --note-dim: rgba(31, 26, 0, .68);
+  --note-line: rgba(70, 56, 0, .35); --note-link: #5c3a00; --note-fold: #c9aa33; --note-fold-2: #8f7518 }
 .sh-notes { position: absolute; right: 100%; top: 0; margin-right: 24px;
   display: flex; flex-direction: column; align-items: flex-end; gap: 12px; pointer-events: none }
 .sh-notes.below-vbadge { top: 72px }

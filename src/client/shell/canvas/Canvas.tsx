@@ -4,6 +4,7 @@ import { CONFIG, useStore } from '../store.ts'
 import { bootHash } from '../hash.ts'
 import { startPerf } from '../perf.ts'
 import { FrameNode, HEADER } from './FrameNode.tsx'
+import { NOTE_GAP } from '../notes.ts'
 import { startCameraBroadcast, setCameraScale } from './camera-broadcast.ts'
 
 /**
@@ -177,7 +178,15 @@ export function Canvas() {
           y0 -= Math.max(64, 36 / s1)    // caption line above the group
         }
       }
-      fitRect(x0, y0, x1 - x0, y1 - y0, focus)
+      // sticky notes (spec 18): a visible column hangs left of its frame, and may run below it
+      let y1n = y1
+      for (const n of ns) {
+        const col = document.querySelector(`[data-node-notes="${CSS.escape(n.key)}"]:not(.off)`) as HTMLElement | null
+        if (!col) continue
+        x0 = Math.min(x0, n.x - col.offsetWidth - NOTE_GAP)
+        y1n = Math.max(y1n, n.y + col.offsetTop + col.offsetHeight)
+      }
+      fitRect(x0, y0, x1 - x0, y1n - y0, focus)
     }
     canvasCtl.fitNode = (key: string) => fitKeys([key], true)
     canvasCtl.fitNodes = (keys: string[]) => fitKeys(keys, true)

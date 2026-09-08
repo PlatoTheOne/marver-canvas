@@ -234,6 +234,18 @@ describe('sticky notes on the canvas', () => {
     expect(log).not.toMatch(/error/i)
   })
 
+  it('a hostile note is inert in the shell realm: script, handlers and foreign tags never reach the DOM', async () => {
+    if (!browser) return
+    const s = await open(browser)
+    writeFileSync(join(root, 'design', 'scenes', 'app', 'next.note.md'), 'hi <script><img/src=x onerror=window.__pwned=1></script> and <b onclick=x>bold</b> <iframe src=x></iframe>\n\n<img src=x onerror=window.__pwned=2>\n\n![ok](flow.png)')
+    await browser.until(s, `!!document.querySelector('[data-node="n-next"] [data-sticky="frame"] .sh-sticky-body')`, 15_000)
+    await wait(300)
+    const state = await browser.eval(s, `(() => { const b = document.querySelector('[data-node="n-next"] [data-sticky="frame"] .sh-sticky-body'); return { pwned: window.__pwned ?? null, imgs: b.querySelectorAll('img').length, handlers: b.querySelectorAll('[onerror],[onclick]').length, foreign: b.querySelectorAll('script,iframe,b').length, text: b.textContent.includes('<script>') && b.textContent.includes('onclick=x') } })()`)
+    expect(state).toEqual({ pwned: null, imgs: 1, handlers: 0, foreign: 0, text: true })
+    rmSync(join(root, 'design', 'scenes', 'app', 'next.note.md'))
+    await browser.until(s, `document.querySelectorAll('[data-node="n-next"] .sh-notes').length === 0`, 15_000)
+  })
+
   it('a published canvas carries the notes: column, diagram and the note’s image, no dev server', async () => {
     if (!browser) return
     writeFileSync(join(root, 'design', 'scenes', 'app', 'home.note.md'), NOTE.replace('Why the jobs list leads', 'Why the list leads now'))   // order-independent: the text this test expects

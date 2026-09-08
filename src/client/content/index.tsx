@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useInSlide } from './slide.tsx'
 import { CONTENT_WIDTH } from '../const.ts'
-import { assetUrl, renderMarkdown, FAMILIES } from './md.ts'
+import { assetUrl, renderMarkdown, sanitizeMarkdownHtml, FAMILIES } from './md.ts'
 import { lodSupported, registerLodImage } from './img-lod.ts'
 
 // D3: family color classes for inline Md (`:blue[...]`), theme-aware (frames carry .dark + [data-theme])
@@ -87,7 +87,7 @@ export function Space({ n = 1 }: { n?: number }) {
 export function Md({ children }: { children?: ReactNode }) {
   ensureStyles()
   const src = typeof children === 'string' ? children : Array.isArray(children) ? children.join('') : String(children ?? '')
-  const html = useMemo(() => renderMarkdown(src), [src])
+  const html = useMemo(() => sanitizeMarkdownHtml(renderMarkdown(src)), [src])
   return <div className="mv-md" dangerouslySetInnerHTML={{ __html: html }} />
 }
 

@@ -67,6 +67,15 @@ export function withFamilies(src: string): string {
   return `${src}\n${defs}`
 }
 
+/** The zero-external-request boundary, BEFORE render: mermaid's image shapes fetch their URL
+ *  during render(), so post-render SVG sanitizing alone is too late. Rejected: any URL shape
+ *  (scheme + // or scheme + \\, protocol-relative //), and the `img:` shape data of the
+ *  flowchart node syntax `A@{ img: ... }` - the one construct that loads a resource at all. */
+export function guardDiagramSource(src: string): void {
+  if (/(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(src) || /[a-z][a-z0-9+.-]*:\\/i.test(src)) throw new Error('URLs are not allowed in diagram source - use local design/assets/ images in an Img block instead')
+  if (/@\s*\{[^}]*\bimg\s*:/i.test(src)) throw new Error('image shapes are not allowed in diagram source')
+}
+
 /** Remove external URL references from rendered SVG (images, links, href attrs). */
 export function sanitizeSvg(svg: string): string {
   const doc = new DOMParser().parseFromString(svg, 'image/svg+xml')
@@ -100,7 +109,7 @@ export function Diagram({ title, children }: { title?: string; children?: ReactN
         // shapes fetch their URL during render(), so post-render SVG sanitizing alone
         // would be too late. Reject ANY URL shape - absolute (scheme://) and
         // protocol-relative (//host) alike; neither has a place in diagram source.
-        if (/(?:\w+:)?\/\//.test(src)) throw new Error('URLs are not allowed in diagram source - use local design/assets/ images in an Img block instead')
+        guardDiagramSource(src)
         const mermaid = (await import('mermaid')).default
         if (!live || mySeq !== seq) return
         mermaid.initialize({

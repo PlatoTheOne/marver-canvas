@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore, BOARD_POLICY, BRANDING, CONFIG, PUBLISHED, SOURCE_REVEALED, boardLabel, boardLocked, cap, fetchBoardNames, modeAllowed, playsAsSlides, SLIDE_INTRINSIC, type Node } from './store.ts'
 import { deckOrder } from './play-order.ts'
 import { useComments } from './comments-store.ts'
+import { isNoteAnchor } from './notes.ts'
 import { ROUTE } from '../const.ts'
 import { poweredByUrl } from '../../shared/utm.ts'
 import { canvasCtl } from './canvas/ctl.ts'
@@ -207,7 +208,9 @@ function PlayComments({ iframe, frameId, vp, dw, dh, ready }: {
   const draft = useComments((s) => s.draft)
   const allThreads = useComments((s) => s.threads)
   const { setActive } = useComments.getState()
-  const threads = allThreads.filter((t) => t.frame === frameId && !t.resolved)
+  // a thread on a sticky note (spec 18) belongs to the canvas: the stage has no notes, and its
+  // anchor must never be handed to inspect.js (a same-named frame element would match)
+  const threads = allThreads.filter((t) => t.frame === frameId && !t.resolved && !isNoteAnchor(t.anchor))
   const anchored = threads.filter((t) => (t.anchor as any)?.el)
   const [rects, setRects] = useState<Record<string, { x: number; y: number; w: number; h: number } | null>>({})
   const sx = vp.width ? dw / vp.width : 1
@@ -245,7 +248,7 @@ function PlayComments({ iframe, frameId, vp, dw, dh, ready }: {
     if (!win) return
     // only while the thread is active (or composing) AND pins are shown AND element focus is
     // on (⇧L) - closing, ⇧C, or dimming focus clears it
-    const at = !show || !showAnchor ? null : (draft?.frame === frameId ? draft.anchor
+    const at = !show || !showAnchor ? null : (draft?.frame === frameId && !isNoteAnchor(draft.anchor) ? draft.anchor
       : (active ? (threads.find((t) => t.id === active && (t.anchor as any)?.el)?.anchor ?? null) : null))
     win.postMessage({ type: 'sh:highlight-anchor', frame: frameId, anchor: at ?? null }, location.origin)
   }, [active, draft, show, showAnchor, frameId, iframe, rects, ready])
@@ -261,7 +264,7 @@ function PlayComments({ iframe, frameId, vp, dw, dh, ready }: {
     return { x: (p?.fx ?? .94) * dw, y: (p?.fy ?? .06) * dh, orphan: false }
   }
   const activeThread = threads.find((t) => t.id === active)
-  const draftAt = draft?.frame === frameId ? (() => {
+  const draftAt = draft?.frame === frameId && !isNoteAnchor(draft.anchor) ? (() => {
     const a = draft.anchor as any
     return { x: ((a?.rect?.x ?? 0) + (a?.pos?.fx ?? .5) * (a?.rect?.w ?? 0)) * sx, y: ((a?.rect?.y ?? 0) + (a?.pos?.fy ?? .5) * (a?.rect?.h ?? 0)) * sy }
   })() : null
