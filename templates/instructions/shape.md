@@ -206,17 +206,21 @@ links open a new tab, images are `design/assets/` paths, raw HTML is inert, and 
 ` ```mermaid ` fence renders hand-drawn, in the note's own yellow. Readers can comment on any
 element of a note exactly as on a frame element.
 
-```md
+````md
 ## Why the jobs list leads
 
 Drivers ask "where am I going first" - the list beats the map here.
 Compare with the [empty day](goto:app-home/today-empty): same header, one call to action.
 
+| Reason | Effect |
+|---|---|
+| Too far | lane weight down |
+
 ```mermaid
 flowchart LR
   Login --> Today --> Jobs
 ```
-```
+````
 
 Keep it an aside: a screen's worth of reading at most. The spec, the flow, the mood board stay
 content frames - a note explains, it does not document. Every viewer can fold a note to its

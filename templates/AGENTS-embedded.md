@@ -118,6 +118,18 @@ Report where the request came from: chat requests get chat replies; only comment
 - CONTENT frames (specs, mermaid diagrams, mood boards) are ordinary tsx frames built
   from the block primitives in '@marver-design/marver/content' - import them directly
   in the frame file and declare meta.intent. Full guide: instructions/shape.md.
+- STICKY NOTES: the aside beside a frame. One markdown file, nothing to declare:
+  `design/scenes/<scene>/<frame>.note.md` beside the frame file (tsx, jsx or html),
+  `design/scenes/<scene>/_note.md` for the scene (it shows beside the scene's first frame),
+  `design/components/<name>.note.md` for a component. It renders as a yellow note left of the
+  frame on every canvas, dev and published. Write one when a reader needs what the screen
+  cannot say: what the frame is for, how two variations differ, how a mechanism works, an
+  open question. Markdown (headings, lists, tables, emphasis, code), `[text](goto:scene/frame)`
+  links that jump to a frame, images from design/assets/, and ```mermaid fences drawn
+  hand-sketched - raw HTML is inert. Readers comment on a note's text like on a frame element,
+  fold it to its corner, hide all with N. An edit lands live without reloading the frame.
+  Keep it an aside, a screen's worth at most: specs, flows and mood boards stay content frames.
+  Full guide: instructions/shape.md.
 
 ## Structure ladder (embedded mode: screens live in src/)
 1. First pass: write the whole page inline in the frame file. Diverge fast.
