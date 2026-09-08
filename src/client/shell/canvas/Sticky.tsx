@@ -80,37 +80,60 @@ function inkPalette(svg: SVGSVGElement) {
   }
 }
 
-/** One look for every diagram type. mermaid's hand-drawn look (rough.js) reaches flowcharts only;
- *  sequence actors, notes, state and class boxes come out as plain <rect>s. This redraws those
- *  boxes with the same rough.js recipe the flowchart nodes got - hachured fill, sketched border -
- *  in the paper's colours, and hides the plain rect underneath. Seeded per box, so a re-render of
- *  the same note draws the same lines. */
-const SKETCH_BOXES = 'rect.actor, .actor-top rect, .actor-bottom rect, .note rect, rect.note, .noteGroup rect, .labelBox, .statediagram-state rect, .statediagram-state > rect, g.classGroup > rect, .classGroup rect, .er.entityBox, .er.relationshipLabelBox, .journey-section rect, .task rect, .timeline-node rect, .timeline-event rect, .eventWrapper rect, .mindmap-node rect'
-function sketchBoxes(svg: SVGSVGElement, rough: any) {
+/** One look for every diagram type. mermaid's hand-drawn look (rough.js) reaches flowchart,
+ *  state, class, ER and block natively; sequence actors, journey and timeline boxes, mindmap
+ *  nodes, quadrants, git commits, pie slices and legends come out as plain rects, circles and
+ *  paths. Every visible one of those that mermaid did not already sketch is redrawn here with the
+ *  same rough.js recipe the flowchart nodes got - hachured fill, sketched border - in the paper's
+ *  colours, the plain shape kept underneath as a flat backing. Seeded per shape, so a re-render
+ *  of the same note draws the same lines. */
+const FILLS = ['hachure', 'cross-hatch', 'dots', 'zigzag-line', 'dashed'] as const
+function sketchShapes(svg: SVGSVGElement, rough: any) {
   const rc = rough.svg(svg)
-  let seed = 7
-  for (const rect of [...svg.querySelectorAll(SKETCH_BOXES)] as SVGGraphicsElement[]) {
-    if (rect.tagName.toLowerCase() !== 'rect' || (rect as any).__sketched) continue
-    if (/attributeBox/.test(rect.getAttribute('class') ?? '')) continue   // an ER attribute cell is a flat row, not a box
-    if (rect.nextElementSibling?.tagName === 'g' && rect.nextElementSibling.querySelector('path')) continue   // already hand-drawn by mermaid
-    const x = Number(rect.getAttribute('x') ?? 0), y = Number(rect.getAttribute('y') ?? 0)
-    const w = Number(rect.getAttribute('width') ?? 0), h = Number(rect.getAttribute('height') ?? 0)
-    if (!(w > 4 && h > 4)) continue
-    // mermaid's own hand-drawn node recipe (handDrawnShapeStyles: angle 120, gap 4, weight 2,
-    // roughness 0.7) in the paper's colours - the flowchart boxes and these are one family
-    const g = rc.rectangle(x, y, w, h, {
-      seed: seed++, roughness: 0.7, bowing: 0.6,
-      stroke: PAPER.line, strokeWidth: 1.6,
-      fill: PAPER.hatch, fillStyle: 'hachure', hachureAngle: 120, hachureGap: 4, fillWeight: 1.2,
-    }) as SVGGElement
-    // the plain box stays as a flat backing (the flowchart's boxes have one too) and loses its edge
-    rect.setAttribute('style', `fill: ${PAPER.soft}; stroke: none;`)
-    rect.setAttribute('rx', '2')
-    ;(rect as any).__sketched = true
-    rect.after(g)
-    // the text is a later sibling: keep it above the sketch
-    const text = rect.parentElement?.querySelector('text')
-    if (text && text.compareDocumentPosition(g) & Node.DOCUMENT_POSITION_FOLLOWING) text.parentElement?.appendChild(text)
+  let seed = 7, slice = 0
+  const visible = (el: Element) => { const f = getComputedStyle(el).fill; return f !== 'none' && !/rgba\(\d+, \d+, \d+, 0\)/.test(f) }
+  const skip = (el: Element) =>
+    (el as any).__sketched
+    || !!el.closest('.label, foreignObject, marker, defs, .face, .legend-text')
+    || !!el.parentElement?.closest('g.node, g.rough-node, g.cluster')   // the unified renderer's nodes: mermaid sketched these itself
+    || (el.nextElementSibling?.tagName === 'g' && !!el.nextElementSibling.querySelector('path'))   // mermaid's own rough
+    || !visible(el)
+  const place = (el: Element, g: SVGGElement, backing: string) => {
+    el.setAttribute('style', `fill: ${backing}; stroke: none;`)
+    ;(el as any).__sketched = true
+    el.after(g)
+  }
+  const recipe = (extra: Record<string, unknown> = {}) => ({
+    seed: seed++, roughness: 0.7, bowing: 0.6, stroke: PAPER.line, strokeWidth: 1.6,
+    fill: PAPER.hatch, fillStyle: 'hachure', hachureAngle: 120, hachureGap: 4, fillWeight: 1.2, ...extra,
+  })
+  for (const r of [...svg.querySelectorAll('rect')]) {
+    if (skip(r)) continue
+    const w = Number(r.getAttribute('width') ?? 0), h = Number(r.getAttribute('height') ?? 0)
+    if (!(w > 6 && h > 6)) continue
+    const x = Number(r.getAttribute('x') ?? 0), y = Number(r.getAttribute('y') ?? 0)
+    // a quadrant is a field, not a box: the sketched border only, a flat pale backing
+    const field = !!r.closest('.quadrants') || w * h > 40_000
+    place(r, rc.rectangle(x, y, w, h, recipe(field ? { fill: undefined, fillStyle: 'solid' } : {})), field ? PAPER.pale : PAPER.soft)
+  }
+  for (const c of [...svg.querySelectorAll('circle')]) {
+    if (skip(c)) continue
+    const d = 2 * Number(c.getAttribute('r') ?? 0)
+    if (d < 6) continue
+    place(c, rc.circle(Number(c.getAttribute('cx') ?? 0), Number(c.getAttribute('cy') ?? 0), d, recipe(d < 30 ? { fillStyle: 'solid', fill: PAPER.hatch } : {})), PAPER.soft)
+  }
+  for (const e of [...svg.querySelectorAll('ellipse')]) {
+    if (skip(e)) continue
+    place(e, rc.ellipse(Number(e.getAttribute('cx') ?? 0), Number(e.getAttribute('cy') ?? 0), 2 * Number(e.getAttribute('rx') ?? 0), 2 * Number(e.getAttribute('ry') ?? 0), recipe()), PAPER.soft)
+  }
+  // pie slices: one fill style per slice, so the wedges read apart in one colour of ink;
+  // mindmap and timeline draw their boxes as paths (node-bkg) - the same box recipe
+  for (const p of [...svg.querySelectorAll('path.pieCircle, path.node-bkg')]) {
+    if (skip(p)) continue
+    const d = p.getAttribute('d')
+    if (!d) continue
+    const pie = p.classList.contains('pieCircle')
+    place(p, rc.path(d, recipe(pie ? { fillStyle: FILLS[slice++ % FILLS.length], hachureGap: 5, fillWeight: 1 } : {})), PAPER.soft)
   }
 }
 
@@ -147,7 +170,7 @@ async function renderDiagrams(body: HTMLElement, alive: () => boolean) {
     sequence: { mirrorActors: false, actorFontSize: 18, actorFontWeight: 700, messageFontSize: 17, messageFontWeight: 700, noteFontSize: 16, width: 96, height: 50, actorMargin: 26, boxMargin: 8, messageMargin: 30, diagramMarginX: 6, diagramMarginY: 6, wrap: true, bottomMarginAdj: 4 },
     // the wide-by-nature types drawn AT the note's width instead of shrunk into it
     gantt: { useWidth: 380, fontSize: 13, sectionFontSize: 13, barHeight: 22, barGap: 6, topPadding: 44, leftPadding: 64, rightPadding: 12, gridLineStartPadding: 20, numberSectionStyles: 2 },
-    journey: { width: 84, height: 36, leftMargin: 56, taskMargin: 10, taskFontSize: 13, diagramMarginX: 8, diagramMarginY: 8, boxMargin: 6, actorColours: [PAPER.line, PAPER.ink, '#a88f2a', '#e9c94f'] },
+    journey: { width: 118, height: 40, leftMargin: 56, taskMargin: 12, taskFontSize: 13, diagramMarginX: 8, diagramMarginY: 8, boxMargin: 6, actorColours: [PAPER.line, PAPER.ink, '#a88f2a', '#e9c94f'] },
     timeline: { disableMulticolor: true, padding: 10, width: 84, height: 40, leftMargin: 40, taskMargin: 8, diagramMarginX: 8, diagramMarginY: 8 },
     quadrantChart: { chartWidth: 360, chartHeight: 360, titleFontSize: 16, quadrantLabelFontSize: 14, pointLabelFontSize: 13, xAxisLabelFontSize: 13, yAxisLabelFontSize: 13, pointRadius: 5 },
     mindmap: { padding: 10, maxNodeWidth: 150 },
@@ -165,9 +188,8 @@ async function renderDiagrams(body: HTMLElement, alive: () => boolean) {
       if (!alive()) return
       host.innerHTML = sanitizeSvg(svg)
       const el = host.querySelector('svg')
-      if (el) sketchBoxes(el, rough)
       pre.replaceWith(host)
-      if (el) inkPalette(el)   // computed colours need the svg in the document
+      if (el) { sketchShapes(el, rough); inkPalette(el) }   // computed colours need the svg in the document
     } catch (e) {
       if (!alive()) return
       pre.classList.add('err')
