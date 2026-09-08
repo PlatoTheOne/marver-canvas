@@ -21,6 +21,12 @@ Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](ht
 
 - The manifest carries `note` on frames and scenes; the dev watcher regenerates it when a note
   file changes.
+- The agent contract (`design/AGENTS.md`, refreshed by `npx marver init`) and
+  `instructions/shape.md` teach sticky notes: what one is, when to write one, what it supports
+  (markdown, tables, `goto:` links, images, hand-drawn mermaid) and how it works.
+- Markdown in content frames: text inside a raw `<script>`/`<style>` block is now escaped like
+  every other text, and the rendered HTML passes a tag and attribute allowlist before insertion.
+  Diagram source is judged after decoding escapes; image shapes and directives are refused.
 
 ## 0.18.0 - 2026-09-07
 
