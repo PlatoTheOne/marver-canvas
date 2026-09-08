@@ -50,9 +50,24 @@ async function renderDiagrams(body: HTMLElement, alive: () => boolean) {
   if (!alive()) return
   mermaid.initialize({
     startOnLoad: false, securityLevel: 'strict', theme: 'base', look: 'handDrawn', themeVariables: THEME_VARS, fontFamily: HAND_FONT,
-    // legible at sticky size: heavier text, thicker strokes than the default hand-drawn look
-    themeCSS: `.nodeLabel, .edgeLabel, .label, text, tspan { font-weight: 700 !important; letter-spacing: .01em } .edgePath path, .flowchart-link { stroke-width: 2px } .node path, .node rect { stroke-width: 1.6px } .messageText, .actor { font-weight: 700 !important }`,
+    // legible at sticky size. Flowcharts get rough.js boxes and HTML labels; every other type
+    // draws plain SVG text in a handwriting face that has no bold - so SVG text is inked with a
+    // thin stroke (paint-order keeps the fill on top), lines and boxes are darker and thicker.
+    themeCSS: [
+      `.nodeLabel, .edgeLabel, .label { font-weight: 700 !important; letter-spacing: .01em }`,
+      `text, tspan { font-weight: 700 !important; fill: ${PAPER.ink}; stroke: ${PAPER.ink}; stroke-width: .45px; paint-order: stroke fill; letter-spacing: .01em }`,
+      `.edgePath path, .flowchart-link { stroke-width: 2px } .node path, .node rect { stroke-width: 1.6px }`,
+      // sequence: actor boxes, lifelines, messages and arrowheads in the paper's ink
+      `.actor { stroke: ${PAPER.line}; stroke-width: 1.6px; fill: ${PAPER.soft} } .actor-line { stroke: ${PAPER.line} !important; stroke-width: 1.4px !important }`,
+      `.messageLine0, .messageLine1 { stroke: ${PAPER.ink} !important; stroke-width: 1.8px !important } #arrowhead path, .arrowheadPath { fill: ${PAPER.ink} !important; stroke: ${PAPER.ink} !important }`,
+      `.messageText, .actor > tspan, text.actor { fill: ${PAPER.ink} !important }`,
+      `.loopLine { stroke: ${PAPER.line} !important } .labelBox, .loopText, .note { stroke: ${PAPER.line} }`,
+      // state / class / er: the same ink
+      `.statediagram-state rect, .classGroup rect, .er.entityBox { stroke: ${PAPER.line}; stroke-width: 1.6px; fill: ${PAPER.soft} } .transition, .relation, .er.relationshipLine { stroke: ${PAPER.ink} !important; stroke-width: 1.8px !important }`,
+    ].join(' '),
     flowchart: { padding: 10, nodeSpacing: 32, rankSpacing: 36 },
+    // one actor row (the mirrored bottom row is noise at note size), roomier boxes, bigger text
+    sequence: { mirrorActors: false, actorFontSize: 18, actorFontWeight: 700, messageFontSize: 17, messageFontWeight: 700, noteFontSize: 16, width: 96, height: 50, actorMargin: 26, boxMargin: 8, messageMargin: 30, diagramMarginX: 6, diagramMarginY: 6, wrap: true, bottomMarginAdj: 4 },
   })
   for (const code of fences) {
     const pre = code.parentElement!
