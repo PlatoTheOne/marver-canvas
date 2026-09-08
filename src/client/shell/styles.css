@@ -1340,4 +1340,10 @@ body.sh-commenting .sh-sticky-body { cursor: crosshair }
 .sh-sticky-body .mv-c-green { color: #1a8a3f } .sh-sticky-body .mv-c-red { color: #c72a22 } .sh-sticky-body .mv-c-gray { color: #6b7480 }
 /* the hand-drawn diagram: the fence's place, the paper's colors, scaled to the column */
 .sh-sticky-diagram { margin: 4px 0 10px; overflow: visible }
-.sh-sticky-diagram svg { display: block; max-width: 100%; height: auto }
+.sh-sticky-diagram svg { display: block; max-width: 100%; height: auto;
+  /* the canvas scales the world with a CSS transform, and Chrome lays SVG text out ONCE for the
+     scale it was inserted at (a diagram born at 13 % zoom keeps 13 %-zoom glyph positions at
+     140 %: labels drift, some vanish). geometricPrecision lays glyphs out scale-free - measured,
+     research/notes/diagprobe5.ts */
+  text-rendering: geometricPrecision }
+.sh-sticky-diagram svg text, .sh-sticky-diagram svg tspan { text-rendering: geometricPrecision }
