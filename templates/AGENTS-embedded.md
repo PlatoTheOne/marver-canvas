@@ -132,8 +132,9 @@ Report where the request came from: chat requests get chat replies; only comment
   raw HTML is inert. Readers comment on a note's text like on a frame element,
   fold it to its corner, hide all with N. An edit lands live without reloading the frame.
   Placement is not your job: every composed layout (recipe, auto board, tidy, device views)
-  reserves the note's room in front of its frame and re-applies when a note lands - never
-  move frames or pad a lane for a note, just write the file.
+  reserves the note's room in front of its frame and below it (a long note pushes the next
+  row down) and re-applies when a note lands or grows - never move frames or pad a lane for
+  a note, sideways or down, just write the file.
   Keep it an aside, a screen's worth at most: specs, flows and mood boards stay content frames.
   Full guide: instructions/shape.md.
 

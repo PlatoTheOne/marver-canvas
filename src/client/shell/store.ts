@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { ROUTE, slideSize } from '../const.ts'
 import { tidy, parseLayout, type BoardLayout, type TidyNode } from './tidy.ts'
-import { noteReserve, notesCramped } from './notes.ts'
+import { noteHeight, noteReserve, notesCramped, setNoteHeight } from './notes.ts'
 import { stableNodeKey } from './keys.ts'
 // @ts-expect-error virtual module provided by the plugin
 import shConfig from 'virtual:sh-config'
@@ -208,9 +208,10 @@ export async function boardFrames(name: string): Promise<string[]> {
 }
 
 const HEADER = 28
-/** What tidy sees: nodes with their scene, variant run, header-inclusive height, and the sticky
+/** What tidy sees: nodes with their scene, variant run, header-inclusive height, the sticky
  *  note width to reserve in front (spec 18: the frame's note, and the scene's on every member -
- *  tidy keeps the scene reserve on the first node it places). */
+ *  tidy keeps the scene reserve on the first node it places), and the measured height of the
+ *  column standing there, so a note longer than its frame gets its room below as well. */
 export function tidyInput(nodes: readonly Node[], manifest: Manifest | null): TidyNode[] {
   const entryOf = (id: string) => manifest?.frames.find((f) => f.id === id)
   const sceneNote = (scene: string) => !!manifest?.scenes.find((s) => s.name === scene)?.note
@@ -219,7 +220,7 @@ export function tidyInput(nodes: readonly Node[], manifest: Manifest | null): Ti
     const scene = f?.scene ?? ''
     return {
       key: n.key, frame: n.frame, scene, group: f?.variantGroup, variant: f?.variant, w: n.w, h: n.h + HEADER,
-      noteW: noteReserve(!!f?.note, false), sceneNoteW: noteReserve(false, sceneNote(scene)),
+      noteW: noteReserve(!!f?.note, false), sceneNoteW: noteReserve(false, sceneNote(scene)), noteH: noteHeight(n.key),
     }
   })
 }
@@ -327,6 +328,8 @@ interface State {
   moveNode(key: string, x: number, y: number): void
   resizeNode(key: string, w: number, h: number): void
   measureNode(key: string, frameId: string, ownWidth: number, measuredWidth: number, height: number): void
+  /** A node's sticky column was drawn (or grew, or went): its extent from the node's top, world px. */
+  noteMeasured(key: string, height: number): void
   setStatus(key: string, status: Node['status'], error?: string): void
   bumpRev(key: string): void
   setThemeOn(key: string, theme: string): void
@@ -995,6 +998,11 @@ export const useStore = create<State>((set, get) => {
       if (Math.round(node.h) === H) return
       set((st) => ({ nodes: st.nodes.map((n) => (n.key === key ? { ...n, h: H } : n)) }))
       scheduleReflow()
+    },
+    noteMeasured(key, height) {
+      // the column's height is its content's - the layout learns it here, and a composed board
+      // whose next row now stands under a long note re-applies its recipe (0.19.2)
+      if (setNoteHeight(key, height)) roomForNotes()
     },
     setDeviceView(name) {
       const vp = name ? CONFIG.viewports[name] : null

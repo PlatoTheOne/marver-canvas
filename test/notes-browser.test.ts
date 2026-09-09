@@ -74,6 +74,12 @@ export default () => <main style={{ minHeight: '100vh', background: '${bg}' }}><
     { key: 'c-home', frame: 'app/home', x: 0, y: 0, w: 390, h: 844 },
     { key: 'c-next', frame: 'app/next', x: 420, y: 0, w: 390, h: 844 },
   ] }, null, 2) + '\n')
+  // two rows the cards alone would make, saved tight: `next` above `home` (the scene note hosts on
+  // `next`, first in reading order); a note longer than `next` must push `home`'s row down
+  writeFileSync(join(boards, 'stack.json'), JSON.stringify({ version: 1, name: 'stack', auto: false, layout: { rows: [['app']], scenes: { app: { rows: [['next'], ['home']] } } }, nodes: [
+    { key: 's-next', frame: 'app/next', x: 404, y: 0, w: 390, h: 844 },
+    { key: 's-home', frame: 'app/home', x: 284, y: 1012, w: 390, h: 844 },
+  ] }, null, 2) + '\n')
   // a thread pinned on the frame note's second paragraph - persisted, as a collaborator left it
   const comments = join(root, 'design', 'comments')
   mkdirSync(comments, { recursive: true })
@@ -275,6 +281,41 @@ describe('sticky notes on the canvas', () => {
     expect(cat('c-next').x - cat('c-home').x).toBeGreaterThanOrEqual(390 + 260 + 24)
     rmSync(join(root, 'design', 'scenes', 'app', 'next.note.md'))
     await browser.until(s, `document.querySelectorAll('[data-node="r-next"] .sh-notes').length === 0`, 15_000)
+    expect(log).not.toMatch(/error/i)
+  }, 60_000)
+
+  it('a note longer than its frame gets its room below: the row under it moves down as far as the column runs, and the gutter stays the card\u2019s', async () => {
+    if (!browser) return
+    const s = await browser.tab({ width: 1500, height: 950 })
+    await browser.go(s, `${ORIGIN}/#/b/stack`)
+    await browser.until(s, `document.querySelectorAll('.sh-node').length === 2 && document.querySelectorAll('[data-node="s-next"] .sh-notes .sh-sticky').length === 1 && document.querySelectorAll('[data-node="s-home"] .sh-notes .sh-sticky').length === 1`, 30_000)
+    await wait(800)
+    const pos = () => browser!.eval(s, `(() => { const at = (k) => { const m = document.querySelector('[data-node="' + k + '"]').style.transform.match(/translate\\((-?[\\d.]+)px, (-?[\\d.]+)px/); return { x: +m[1], y: +m[2] } }; return { next: at('s-next'), home: at('s-home') } })()`)
+    // the scene note on `next` is short: nothing is cramped, the tight rows stay as saved
+    expect(await pos()).toEqual({ next: { x: 404, y: 0 }, home: { x: 284, y: 1012 } })
+    // a long frame note lands on `next`: its column runs far below the frame, over `home`'s column and card
+    writeFileSync(join(root, 'design', 'scenes', 'app', 'next.note.md'), ['## Every state of the second screen', ...Array.from({ length: 30 }, (_, i) => `${i + 1}. When the list is ${['empty', 'loading', 'stale', 'filtered'][i % 4]} the header keeps its place and the rail folds; the footer action stays reachable on every viewport we ship.`)].join('\n\n'))
+    await browser.until(s, `document.querySelectorAll('[data-node="s-next"] .sh-notes .sh-sticky').length === 2`, 15_000)
+    // the column's bottom (world px) is what the layout must clear
+    const column = () => browser!.eval(s, `(() => { const col = document.querySelector('[data-node="s-next"] .sh-notes'); return col.offsetTop + col.offsetHeight })()`)
+    expect(await column()).toBeGreaterThan(844 + 28)
+    await browser.until(s, `(() => { const col = document.querySelector('[data-node="s-next"] .sh-notes').getBoundingClientRect(); const home = document.querySelector('[data-node="s-home"]').getBoundingClientRect(); return home.top >= col.bottom - 0.5 })()`, 15_000)
+    const after = await pos(), colH = await column()
+    expect(after.next).toEqual({ x: 404, y: 0 })
+    expect(after.home.y).toBeGreaterThanOrEqual(colH)
+    expect(after.home.y - colH).toBeLessThan(400)                                    // the gutter is the card's (~140), never scaled by the note
+    // saved with the board, so the next load starts from it
+    await wait(1500)
+    const saved = JSON.parse(await (await fetch(`${ORIGIN}/__mv/api/boards/stack`)).text())
+    expect(Math.abs(saved.board.nodes.find((n: any) => n.key === 's-home').y - after.home.y)).toBeLessThan(1)   // the file rounds
+    // folding the column keeps its room: no reflow on a fold
+    await browser.eval(s, `document.querySelector('[data-node="s-next"] .sh-notes-fold').click()`)
+    await browser.until(s, `document.querySelector('[data-node="s-next"] .sh-notes').classList.contains('off')`)
+    await wait(1200)
+    expect((await pos()).home.y).toBe(after.home.y)
+    await browser.eval(s, `document.querySelector('[data-node="s-next"] .sh-notes-fold').click()`)
+    rmSync(join(root, 'design', 'scenes', 'app', 'next.note.md'))
+    await browser.until(s, `document.querySelectorAll('[data-node="s-next"] .sh-notes .sh-sticky').length === 1`, 15_000)
     expect(log).not.toMatch(/error/i)
   }, 60_000)
 

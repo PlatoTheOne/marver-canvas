@@ -4,6 +4,10 @@ export interface TidyNode {
    *  (its own note), and in front of the scene's first placed node (the scene note - carried on
    *  every member, applied once). A column holds both, so the wider wins, never the sum. */
   noteW?: number; sceneNoteW?: number
+  /** The note column's measured extent (world px from the node's top), when it is known. A column
+   *  taller than its card runs below it: the node takes that height in its lane, so the next
+   *  lane starts under the note - the gutter itself is still sized from the card. */
+  noteH?: number
 }
 export interface Placed { key: string; x: number; y: number }
 
@@ -36,20 +40,23 @@ interface Box {
   charW: number; charH: number
 }
 
-const box = (id: string, parts: Array<{ key: string; dx: number; dy: number; w: number; h: number }>): Box => ({
+/** `h` is the part's extent (card, or its note column when that runs further); `ch` the card's own
+ *  height, the characteristic size gutters are measured from - a long note never inflates them. */
+const box = (id: string, parts: Array<{ key: string; dx: number; dy: number; w: number; h: number; ch?: number }>): Box => ({
   id,
   parts: parts.map(({ key, dx, dy }) => ({ key, dx, dy })),
   w: Math.max(0, ...parts.map((p) => p.dx + p.w)),
   h: Math.max(0, ...parts.map((p) => p.dy + p.h)),
   charW: Math.max(0, ...parts.map((p) => p.w)),
-  charH: Math.max(0, ...parts.map((p) => p.h)),
+  charH: Math.max(0, ...parts.map((p) => p.ch ?? p.h)),
 })
+const extent = (n: TidyNode) => Math.max(n.h, n.noteH ?? 0)
 
 /** A run of nodes laid side by side (a frame's instances, or a variant run). */
 const runBox = (id: string, run: TidyNode[]): Box => {
-  const parts: Array<{ key: string; dx: number; dy: number; w: number; h: number }> = []
+  const parts: Array<{ key: string; dx: number; dy: number; w: number; h: number; ch?: number }> = []
   let dx = 0
-  for (const n of run) { dx += n.noteW ?? 0; parts.push({ key: n.key, dx, dy: 0, w: n.w, h: n.h }); dx += n.w + frameGapX(n.w) }
+  for (const n of run) { dx += n.noteW ?? 0; parts.push({ key: n.key, dx, dy: 0, w: n.w, h: extent(n), ch: n.h }); dx += n.w + frameGapX(n.w) }
   return box(id, parts)
 }
 
@@ -285,7 +292,7 @@ export function tidy(nodes: TidyNode[], layout?: BoardLayout, warn: Warn = () =>
     sceneMaps.set(scene, m)
     const parts = members
       .filter((n) => m.has(n.key))
-      .map((n) => ({ key: n.key, dx: m.get(n.key)!.x, dy: m.get(n.key)!.y, w: n.w, h: n.h }))
+      .map((n) => ({ key: n.key, dx: m.get(n.key)!.x, dy: m.get(n.key)!.y, w: n.w, h: extent(n), ch: n.h }))
     sceneBoxes.set(scene, box(scene, parts))
   }
 

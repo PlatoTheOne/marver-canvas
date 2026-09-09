@@ -44,14 +44,32 @@ export function sceneNoteHost(
  *  `h + NODE_HEADER` tall, and that is the height a note beside it has to clear. */
 export const NODE_HEADER = 28
 
-/** True when a note has no room: another node's card stands inside the reserve in front of a
- *  noted node (its own note, or the scene's note it hosts). Room is the layout's job, never the
- *  author's - a board the shell composes re-applies its layout when this is true, so a note file
- *  can land on a saved board and the frames make way. Missing nodes (a deleted frame's card, still
- *  drawn full size) block room but never host a note. */
+/** The measured extent of a node's note column: world px from the node's top to the bottom of
+ *  its last sticky (0 = no column, or not rendered yet). A note's height is its content's, known
+ *  only once it is drawn - so, like a content frame's height, it is measured, transient (never
+ *  serialized, a reload remeasures), and fed back to the layout when it lands. */
+const noteHeights = new Map<string, number>()
+export const noteHeight = (key: string): number => noteHeights.get(key) ?? 0
+/** Record a column's extent; true when it changed (the caller asks the layout for room then). */
+export function setNoteHeight(key: string, h: number): boolean {
+  const H = Number.isFinite(h) && h > 0 ? Math.round(h) : 0
+  if ((noteHeights.get(key) ?? 0) === H) return false
+  if (H) noteHeights.set(key, H)
+  else noteHeights.delete(key)
+  return true
+}
+
+/** True when a note has no room: another node stands inside the space in front of a noted node
+ *  (its own note, or the scene's note it hosts) - beside its card, or below it where a note taller
+ *  than its frame runs on. Room is the layout's job, never the author's - a board the shell
+ *  composes re-applies its layout when this is true, so a note file can land on a saved board and
+ *  the frames make way. A node's envelope is its card plus its own note column, so two columns
+ *  running into each other cramp too. Missing nodes (a deleted frame's card, still drawn full
+ *  size) block room but never host a note. `noteH` is the measured column extent per node. */
 export function notesCramped(
   nodes: readonly { key: string; frame: string; x: number; y: number; w: number; h: number; missing?: boolean }[],
   manifest: { frames: { id: string; scene: string; note?: string }[]; scenes: { name: string; note?: string }[] } | null,
+  noteH: (key: string) => number = noteHeight,
 ): boolean {
   if (!manifest) return false
   const entry = (id: string) => manifest.frames.find((f) => f.id === id)
@@ -62,11 +80,15 @@ export function notesCramped(
     const h = sceneNoteHost(live, (id) => entry(id)?.scene, s.name)
     if (h) hosts.add(h)
   }
+  type N = (typeof nodes)[number]
+  const reserve = (n: N) => (n.missing ? 0 : noteReserve(!!entry(n.frame)?.note, hosts.has(n.key)))
+  const bottom = (n: N) => n.y + Math.max(n.h + NODE_HEADER, n.missing ? 0 : noteH(n.key))
   return live.some((n) => {
-    const r = noteReserve(!!entry(n.frame)?.note, hosts.has(n.key))
+    const r = reserve(n)
     if (!r) return false
-    const x0 = n.x - r, y1 = n.y + n.h + NODE_HEADER
-    return nodes.some((o) => o !== n && o.x < n.x && o.x + o.w > x0 && o.y < y1 && o.y + o.h + NODE_HEADER > n.y)
+    // the note's room: the reserve beside the card, as tall as the card or the column, whichever runs further
+    const x0 = n.x - r, y1 = bottom(n)
+    return nodes.some((o) => o !== n && o.x - reserve(o) < n.x && o.x + o.w > x0 && o.y < y1 && bottom(o) > n.y)
   })
 }
 

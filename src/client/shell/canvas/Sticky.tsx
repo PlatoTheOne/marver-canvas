@@ -19,6 +19,7 @@ import { cleanSource, guardDiagramSource, sanitizeSvg } from '../../content/diag
 import { useComments } from '../comments-store.ts'
 import { goTo } from '../goto.ts'
 import { NOTE_W, SCENE_NOTE_W, noteAnchor, noteVisible, useNotes, type NoteKind } from '../notes.ts'
+import { useStore } from '../store.ts'
 
 export interface NoteSpec { kind: NoteKind; id: string; text: string }
 
@@ -266,10 +267,24 @@ function StickyBody({ text, kind, nodeKey, frameId }: { text: string; kind: Note
 export const Stickies = memo(function Stickies({ nodeKey, frameId, notes, underBadge }: { nodeKey: string; frameId: string; notes: NoteSpec[]; underBadge: boolean }) {
   const ids = notes.map((n) => n.id)
   const on = useNotes((s) => noteVisible(s, ids))
+  const col = useRef<HTMLDivElement>(null)
+  // the column's extent is measured, never computed: markdown, fonts and diagrams decide it. The
+  // layout gets it (and its changes) so a note longer than its frame has room below; a folded
+  // column keeps its height (the fold is a transform), so folding never reflows. Unmounting
+  // (notes gone, board switched) clears it.
+  useEffect(() => {
+    const el = col.current
+    if (!el) return
+    const report = () => useStore.getState().noteMeasured(nodeKey, el.offsetTop + el.offsetHeight)
+    const ro = new ResizeObserver(report)
+    ro.observe(el)
+    report()
+    return () => { ro.disconnect(); useStore.getState().noteMeasured(nodeKey, 0) }
+  }, [nodeKey, underBadge, notes.length])
   if (!notes.length) return null
   const width = Math.max(...notes.map((n) => (n.kind === 'scene' ? SCENE_NOTE_W : NOTE_W)))
   return (
-    <div className={`sh-notes${on ? '' : ' off'}${underBadge ? ' below-vbadge' : ''}`} data-node-notes={nodeKey} style={{ width }}>
+    <div ref={col} className={`sh-notes${on ? '' : ' off'}${underBadge ? ' below-vbadge' : ''}`} data-node-notes={nodeKey} style={{ width }}>
       <button className="sh-notes-fold sh-no-pan" type="button" aria-label={on ? 'hide notes' : 'show notes'} title={on ? 'hide notes (N: all)' : 'show notes (N: all)'}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); useNotes.getState().toggle(ids) }} />

@@ -2,6 +2,18 @@
 
 Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](https://keepachangelog.com); versions follow semver.
 
+## 0.19.2 - 2026-09-09
+
+### Fixed
+
+- **A note longer than its frame gets its room below.** 0.19.1 reserved a note's width beside its
+  frame and nothing under it: a long note ran on below the card and over the next row's notes and
+  frames. The column's height is now measured as it renders (markdown, fonts and diagrams decide
+  it) and fed to the layout: a composed board's next row starts under the note, the gutter still
+  the card's, and a board already saved re-applies its recipe when a note lands or grows past its
+  frame, as it did for width. Two columns running into each other count as cramped too. Folding a
+  note keeps its room, so a fold never moves the board.
+
 ## 0.19.1 - 2026-09-08
 
 ### Fixed

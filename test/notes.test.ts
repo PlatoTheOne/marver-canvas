@@ -228,4 +228,32 @@ describe('room for a note is the layout’s job', () => {
     expect(notesCramped([{ ...row(500)[0], missing: true }, row(500)[1], row(500)[2]], manifest({ frame: true }))).toBe(true)
     expect(notesCramped([{ ...row(500)[0], missing: true }, row(500)[1], row(500)[2]], manifest({}))).toBe(false)
   })
+  it('a note taller than its frame needs room below: the row under it cramps, and tidy given the height starts the next lane under the note', () => {
+    // as tidy lays them: `a` (scene s, noted) behind its 284 px reserve, `c` (scene t, no note) at x 0 in the row
+    // under - the row the cards alone would make; a's note runs 2000 px down, over c's card
+    const stacked = [{ ...row(500)[0], x: NOTE_W + NOTE_GAP }, { ...row(500)[1], x: 1200 }, { ...row(500)[2], x: 0, y: 844 + NODE_HEADER + 140 }]
+    const m = { frames: [{ id: 's/a', scene: 's', note: 'long' }, { id: 's/b', scene: 's' }, { id: 't/c', scene: 't' }], scenes: [{ name: 's' }, { name: 't' }] }
+    const tall = (key: string) => (key === 'a' ? 2000 : 0)
+    expect(notesCramped(stacked, m)).toBe(false)                                   // height unknown: the card's own height is the reserve
+    expect(notesCramped(stacked, m, tall)).toBe(true)                              // known: c stands under a's note
+    expect(notesCramped(stacked, m, (k) => (k === 'a' ? 900 : 0))).toBe(false)     // a hair longer than the card, still above c
+    expect(notesCramped(stacked, m, (k) => (k === 'c' ? 3000 : 0))).toBe(false)    // c has no note: a height for it means nothing
+    // c beside the column, not under it (x 500 > a's 284): the note runs past c's row through empty canvas
+    const beside = stacked.map((n) => (n.key === 'c' ? { ...n, x: 500 } : n))
+    expect(notesCramped(beside, m, tall)).toBe(false)
+    // ...unless c has a note of its own: its column (216..500) stands under a's - two columns running into each other cramp
+    const both = { ...m, frames: m.frames.map((f) => (f.id === 't/c' ? { ...f, note: 'also' } : f)) }
+    expect(notesCramped(beside, both, tall)).toBe(true)
+    expect(notesCramped(beside, both)).toBe(false)
+    // tidy with the height: c's row starts under the note, and the gutter stays the card's, not the note's
+    const input = (noteH: (k: string) => number) => stacked.map((n) => ({ key: n.key, frame: n.frame, scene: n.frame.split('/')[0], w: n.w, h: n.h + NODE_HEADER, noteW: noteReserve(n.key === 'a', false), noteH: noteH(n.key) }))
+    const layout = { rows: [['s'], ['t']] }
+    const withoutH = tidy(input(() => 0), layout), withH = tidy(input(tall), layout)
+    const cy = (p: { key: string; y: number }[]) => p.find((x) => x.key === 'c')!.y
+    expect(cy(withoutH)).toBeLessThan(2000)
+    expect(cy(withH)).toBeGreaterThanOrEqual(2000)
+    expect(cy(withH) - 2000).toBe(cy(withoutH) - (844 + NODE_HEADER))               // same gutter below the note as below the card
+    const tidied = stacked.map((n) => { const p = withH.find((x) => x.key === n.key)!; return { ...n, x: p.x, y: p.y } })
+    expect(notesCramped(tidied, m, tall)).toBe(false)
+  })
 })
