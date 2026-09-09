@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { ROUTE, slideSize } from '../const.ts'
 import { tidy, parseLayout, type BoardLayout, type TidyNode } from './tidy.ts'
-import { noteHeight, noteReserve, notesCramped, setNoteHeight } from './notes.ts'
+import { clearNoteHeights, noteHeight, noteReserve, notesCramped, setNoteHeight } from './notes.ts'
 import { stableNodeKey } from './keys.ts'
 // @ts-expect-error virtual module provided by the plugin
 import shConfig from 'virtual:sh-config'
@@ -486,6 +486,7 @@ export const useStore = create<State>((set, get) => {
    *  null = failure (transport, malformed manifest, non-404 board error) - the caller
    *  keeps whatever board is currently mounted. */
   const loadBoardState = async (boardName: string): Promise<Partial<State> | null> => {
+    clearNoteHeights()                     // heights are per column drawn; a key shared by two board files carries none across
     try {
       let raw: any
       if (DATA) raw = DATA.manifest
@@ -1034,7 +1035,7 @@ export const useStore = create<State>((set, get) => {
         return { deviceView: name, dirty: true, baseLayout, nodes }
       })
       if (name) get().runTidy()                      // restore must NOT tidy - it would destroy positions
-      else scheduleSave()
+      else { scheduleSave(); roomForNotes() }         // ...unless a note grew meanwhile and the restored rows stand under it
     },
     bumpRev(key) { set((s) => ({ nodes: s.nodes.map((n) => (n.key === key ? { ...n, rev: (n.rev ?? 0) + 1 } : n)) })) },
     setThemeOn(key, theme) { set((s) => ({ nodes: s.nodes.map((n) => (n.key === key ? { ...n, themeOn: theme } : n)) })) },

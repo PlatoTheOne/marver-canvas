@@ -7,7 +7,7 @@ import { markdownImageRefs, publishedManifest } from '../src/server/build.ts'
 import { renderMarkdown } from '../src/client/content/md.ts'
 import { guardDiagramSource } from '../src/client/content/diagram.tsx'
 import { tidy } from '../src/client/shell/tidy.ts'
-import { NODE_HEADER, NOTE_GAP, NOTE_W, SCENE_NOTE_W, noteReserve, notesCramped, sceneNoteHost } from '../src/client/shell/notes.ts'
+import { NODE_HEADER, NOTE_GAP, NOTE_W, SCENE_NOTE_W, noteReserve, notesCramped, sceneNoteHost, clearNoteHeights, noteHeight, setNoteHeight } from '../src/client/shell/notes.ts'
 
 // Sticky notes (spec 18): a markdown file beside the thing it explains reaches the manifest as
 // `note`, the layout keeps room for it, and the shell knows which node shows a scene's.
@@ -245,6 +245,11 @@ describe('room for a note is the layout’s job', () => {
     const both = { ...m, frames: m.frames.map((f) => (f.id === 't/c' ? { ...f, note: 'also' } : f)) }
     expect(notesCramped(beside, both, tall)).toBe(true)
     expect(notesCramped(beside, both)).toBe(false)
+    // the obstacle is the card or the column, never their bounding box: c noted at x 700 under a's card (which
+    // ends at 872) and beside a's column (0..284) - the empty canvas under a's card is free
+    const corner = stacked.map((n) => (n.key === 'c' ? { ...n, x: 700 } : n))
+    expect(notesCramped(corner, both, tall)).toBe(false)
+    expect(notesCramped(corner, both, (k) => (k === 'a' ? 2000 : k === 'c' ? 2000 : 0))).toBe(false)
     // tidy with the height: c's row starts under the note, and the gutter stays the card's, not the note's
     const input = (noteH: (k: string) => number) => stacked.map((n) => ({ key: n.key, frame: n.frame, scene: n.frame.split('/')[0], w: n.w, h: n.h + NODE_HEADER, noteW: noteReserve(n.key === 'a', false), noteH: noteH(n.key) }))
     const layout = { rows: [['s'], ['t']] }
@@ -255,5 +260,16 @@ describe('room for a note is the layout’s job', () => {
     expect(cy(withH) - 2000).toBe(cy(withoutH) - (844 + NODE_HEADER))               // same gutter below the note as below the card
     const tidied = stacked.map((n) => { const p = withH.find((x) => x.key === n.key)!; return { ...n, x: p.x, y: p.y } })
     expect(notesCramped(tidied, m, tall)).toBe(false)
+  })
+  it('measured heights: rounded, 0 or junk clears, only a change reports, a board load starts from none', () => {
+    expect(setNoteHeight('k', 1234.6)).toBe(true)
+    expect(noteHeight('k')).toBe(1235)
+    expect(setNoteHeight('k', 1234.6)).toBe(false)
+    expect(setNoteHeight('k', NaN)).toBe(true)
+    expect(noteHeight('k')).toBe(0)
+    expect(setNoteHeight('k', 0)).toBe(false)
+    setNoteHeight('k', 500)
+    clearNoteHeights()
+    expect(noteHeight('k')).toBe(0)
   })
 })

@@ -58,14 +58,18 @@ export function setNoteHeight(key: string, h: number): boolean {
   else noteHeights.delete(key)
   return true
 }
+/** A board load starts from no heights: node keys are per board file, and a key another board
+ *  also uses must not bring its column's height along (the old board unmounts after the load). */
+export const clearNoteHeights = (): void => { noteHeights.clear() }
 
 /** True when a note has no room: another node stands inside the space in front of a noted node
  *  (its own note, or the scene's note it hosts) - beside its card, or below it where a note taller
  *  than its frame runs on. Room is the layout's job, never the author's - a board the shell
  *  composes re-applies its layout when this is true, so a note file can land on a saved board and
- *  the frames make way. A node's envelope is its card plus its own note column, so two columns
- *  running into each other cramp too. Missing nodes (a deleted frame's card, still drawn full
- *  size) block room but never host a note. `noteH` is the measured column extent per node. */
+ *  the frames make way. An obstacle is another node's card, or its own note column (two columns
+ *  running into each other cramp too) - the two rectangles, never their bounding box: the empty
+ *  canvas under a card beside a long column is free. Missing nodes (a deleted frame's card, still
+ *  drawn full size) block room but never host a note. `noteH` is the measured column extent. */
 export function notesCramped(
   nodes: readonly { key: string; frame: string; x: number; y: number; w: number; h: number; missing?: boolean }[],
   manifest: { frames: { id: string; scene: string; note?: string }[]; scenes: { name: string; note?: string }[] } | null,
@@ -81,14 +85,22 @@ export function notesCramped(
     if (h) hosts.add(h)
   }
   type N = (typeof nodes)[number]
-  const reserve = (n: N) => (n.missing ? 0 : noteReserve(!!entry(n.frame)?.note, hosts.has(n.key)))
-  const bottom = (n: N) => n.y + Math.max(n.h + NODE_HEADER, n.missing ? 0 : noteH(n.key))
+  type R = { x0: number; x1: number; y0: number; y1: number }
+  const hit = (a: R, b: R) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0
+  const card = (n: N): R => ({ x0: n.x, x1: n.x + n.w, y0: n.y, y1: n.y + n.h + NODE_HEADER })
+  // the room a note takes: the reserve beside the card, as tall as the card or the column, whichever runs further
+  const room = (n: N): R | null => {
+    const r = n.missing ? 0 : noteReserve(!!entry(n.frame)?.note, hosts.has(n.key))
+    return r ? { x0: n.x - r, x1: n.x, y0: n.y, y1: n.y + Math.max(n.h + NODE_HEADER, noteH(n.key)) } : null
+  }
   return live.some((n) => {
-    const r = reserve(n)
-    if (!r) return false
-    // the note's room: the reserve beside the card, as tall as the card or the column, whichever runs further
-    const x0 = n.x - r, y1 = bottom(n)
-    return nodes.some((o) => o !== n && o.x - reserve(o) < n.x && o.x + o.w > x0 && o.y < y1 && bottom(o) > n.y)
+    const mine = room(n)
+    if (!mine) return false
+    return nodes.some((o) => {
+      if (o === n) return false
+      const theirs = room(o)
+      return hit(mine, card(o)) || (!!theirs && hit(mine, theirs))
+    })
   })
 }
 

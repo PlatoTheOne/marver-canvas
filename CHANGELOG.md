@@ -11,8 +11,9 @@ Notable changes to `@marver-design/marver`. Format follows [Keep a Changelog](ht
   frames. The column's height is now measured as it renders (markdown, fonts and diagrams decide
   it) and fed to the layout: a composed board's next row starts under the note, the gutter still
   the card's, and a board already saved re-applies its recipe when a note lands or grows past its
-  frame, as it did for width. Two columns running into each other count as cramped too. Folding a
-  note keeps its room, so a fold never moves the board.
+  frame, as it did for width. Two columns running into each other count as cramped too; the empty
+  canvas under a card beside a long column is free. Leaving a device view re-checks the room the
+  restored rows have. Folding a note keeps its room, so a fold never moves the board.
 
 ## 0.19.1 - 2026-09-08
 
