@@ -242,6 +242,9 @@ describe('Live Jam: which agent (detection)', async () => {
   it('one installed → that one', async () => {
     expect(detectAgent({ PATH: await bin('codex') })).toBe('codex')
   })
+  it.runIf(process.platform === 'win32')('Windows native .exe agent is detected', async () => {
+    expect(detectAgent({ PATH: await bin('codex.exe') })).toBe('codex')
+  })
   it('both installed, neither running us → claude by preference', async () => {
     expect(detectAgent({ PATH: await bin('claude', 'codex') })).toBe('claude')
   })

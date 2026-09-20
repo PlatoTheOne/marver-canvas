@@ -52,20 +52,25 @@ export const AGENT_NAMES = `${AGENTS.slice(0, -1).map((a) => `"${a}"`).join(', '
  *
  *  - `isFile`, because a directory carries the execute bit too (it means "traversable"), so an
  *    access check alone would call a folder named `claude` an agent.
- *  - the bare name only, no PATHEXT: the daemon spawns without a shell, and Node cannot run a
- *    Windows `.cmd`/`.bat` shim that way. Finding one would arm a job that fails on every run.
+ *  - the bare name, plus the native `.exe` suffix on Windows. PATHEXT is deliberately ignored:
+ *    the daemon spawns without a shell, and Node cannot run `.cmd`/`.bat` shims that way.
  *
  *  Only ABSOLUTE PATH entries count. An empty entry means the current directory on POSIX, and
  *  a relative one (`.`, `bin`) resolves against it too - and the current directory is the repo
  *  that was just opened, so a `claude` binary shipped inside it is precisely what must never
  *  be found and spawned. */
 export function onPath(cmd: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  // Windows 原生 CLI 通常只有 .exe。Node 无 shell 启动时可以安全解析 .exe，
+  // 但仍不接受 .cmd/.bat，避免检测成功后实际任务无法启动。
+  const candidates = process.platform === 'win32' ? [cmd, `${cmd}.exe`] : [cmd]
   for (const dir of (env.PATH ?? '').split(delimiter)) {
     if (!isAbsolute(dir)) continue
-    try {
-      const file = join(dir, cmd)
-      if (statSync(file).isFile()) { accessSync(file, constants.X_OK); return true }
-    } catch { /* missing, or not ours to run - keep looking */ }
+    for (const candidate of candidates) {
+      try {
+        const file = join(dir, candidate)
+        if (statSync(file).isFile()) { accessSync(file, constants.X_OK); return true }
+      } catch { /* missing, or not ours to run - keep looking */ }
+    }
   }
   return false
 }
