@@ -12,8 +12,12 @@ import { useStore, CONFIG, SOURCE_REVEALED, cap } from './store.ts'
 import { useComments } from './comments-store.ts'
 import { Tip } from './Tip.tsx'
 import { CaretIcon, CheckIcon, CommentIcon, DevicesIcon, EyeSlashIcon, FrameCornersIcon, LaserIcon, MoonIcon, SlideFrameIcon, SunIcon, deviceIcon } from './icons.tsx'
+import { t } from '../../shared/i18n.ts'
 
 const commentsStore = () => useComments.getState()
+
+/** 只翻译 Marver 内建主题名；项目自定义主题名保持原样。 */
+const themeLabel = (name: string) => name === 'light' ? t('Light') : name === 'dark' ? t('Dark') : name === 'default' ? t('Default') : name
 
 /** Shared popover machinery: trigger position, outside-click close, portal to the app
  *  root (glass never nests - a nested backdrop-filter cannot sample the page). */
@@ -93,7 +97,7 @@ export function LaserButton() {
   // copy them has nothing honest to offer
   if (!SOURCE_REVEALED) return null
   return (
-    <Tip side="bottom" label={<TipRows rows={[['Laser mode', 'L'], [showAnchor ? 'Hide laser comment' : 'Show laser comment', '⇧L']]} />}>
+    <Tip side="bottom" label={<TipRows rows={[[t('Laser mode'), 'L'], [showAnchor ? t('Hide laser comment') : t('Show laser comment'), '⇧L']]} />}>
       <button className={`sh-pill-btn${laser ? ' on' : ''}`} onClick={() => {
         if (!laser) commentsStore().setMode(false)
         useStore.getState().setLaser(!laser)
@@ -116,24 +120,24 @@ export function CommentButton() {
   const lockedOut = !!me && !!myBoards && myBoards[board] === 'view'
   if (lockedOut) {
     return (
-      <Tip side="bottom" label={<><b>Commenting is not available for you yet</b><span>click to ask the owner</span></>}>
+      <Tip side="bottom" label={<><b>{t('Commenting is not available for you yet')}</b><span>{t('click to ask the owner')}</span></>}>
         <button className="sh-pill-btn" style={{ opacity: .55 }} onClick={() => {
           const s = useStore.getState()
           if (Date.now() - asked.current < 8000) return
           asked.current = Date.now()
           void commentsStore().askToComment().then((ok) =>
-            s.toast(ok ? 'asked the owner for comment access - they decide' : 'could not send the request - try again'))
+            s.toast(ok ? t('asked the owner for comment access - they decide') : t('could not send the request - try again')))
         }}><CommentIcon size={16} /></button>
       </Tip>
     )
   }
   return (
-    <Tip side="bottom" label={<TipRows rows={[['Comment', 'C'], [show ? 'Hide pins' : 'Show pins', '⇧C']]} />}>
+    <Tip side="bottom" label={<TipRows rows={[[t('Comment'), 'C'], [show ? t('Hide pins') : t('Show pins'), '⇧C']]} />}>
       <button className={`sh-pill-btn${commentMode ? ' on' : ''}`} onClick={() => {
         const c = commentsStore()
         if (!c.commentMode) useStore.getState().setLaser(false)
         c.setMode(!c.commentMode)
-        useStore.getState().toast(c.commentMode ? 'comment mode off' : 'comment mode - click an element in a frame')
+        useStore.getState().toast(c.commentMode ? t('comment mode off') : t('comment mode - click an element in a frame'))
       }}><CommentIcon size={16} /></button>
     </Tip>
   )
@@ -144,7 +148,7 @@ export function CommentButton() {
 export function HideUIButton() {
   const on = useHideUI()
   return (
-    <Tip side="bottom" label={<><b>Hide all UI</b><span>press H to reveal</span></>}>
+    <Tip side="bottom" label={<><b>{t('Hide all UI')}</b><span>{t('press H to reveal')}</span></>}>
       <button className={`sh-pill-btn${on ? ' on' : ''}`} onClick={toggleHideUI}><EyeSlashIcon size={16} /></button>
     </Tip>
   )
@@ -169,7 +173,7 @@ export function DevicePicker({ value, onSelect, includeDefault, includeFill, inc
   const triggerIcon = value === 'fill' ? <FrameCornersIcon size={16} /> : value === 'slide' ? <SlideFrameIcon size={16} /> : deviceIcon(value, 16)
   return (
     <div className="sh-theme" ref={pop.boxRef}>
-      <Tip side="bottom" label={<><b>Device view</b>{hint && <span>{hint}</span>}</>}>
+      <Tip side="bottom" label={<><b>{t('Device view')}</b>{hint && <span>{hint}</span>}</>}>
         <button className="sh-pill-btn" onClick={pop.toggle}>
           {triggerIcon}
           <CaretIcon size={11} style={{ transform: pop.open ? 'rotate(180deg)' : undefined }} />
@@ -178,14 +182,14 @@ export function DevicePicker({ value, onSelect, includeDefault, includeFill, inc
       <Popover pop={pop} dark={dark}>
         {includeSlide && <>
           <button onClick={() => pick('slide')} title="1280 × 720">
-            <SlideFrameIcon size={15} /><span>Slide</span>
+            <SlideFrameIcon size={15} /><span>{t('Slide')}</span>
             {value === 'slide' && <CheckIcon size={13} className="chk" />}
           </button>
           <i className="div" />
         </>}
         {includeDefault && <>
           <button onClick={() => pick(null)}>
-            <DevicesIcon size={15} /><span>Default</span><kbd>0</kbd>
+            <DevicesIcon size={15} /><span>{t('Default')}</span><kbd>0</kbd>
             {value === null && <CheckIcon size={13} className="chk" />}
           </button>
           <i className="div" />
@@ -197,7 +201,7 @@ export function DevicePicker({ value, onSelect, includeDefault, includeFill, inc
           </button>
         ))}
         {includeFill && <button onClick={() => pick('fill')}>
-          <FrameCornersIcon size={15} /><span>Fill window</span><kbd>{entries.length + 1}</kbd>
+          <FrameCornersIcon size={15} /><span>{t('Fill window')}</span><kbd>{entries.length + 1}</kbd>
           {value === 'fill' && <CheckIcon size={13} className="chk" />}
         </button>}
       </Popover>
@@ -214,18 +218,18 @@ export function ThemePicker({ value, checked, onSelect, hint, dark }: { value: s
   const tick = checked === undefined ? value : checked
   return (
     <div className="sh-theme" ref={pop.boxRef}>
-      <Tip side="bottom" label={<><b>Theme</b>{hint && <span>{hint}</span>}</>}>
+      <Tip side="bottom" label={<><b>{t('Theme')}</b>{hint && <span>{hint}</span>}</>}>
         <button className="sh-pill-btn" onClick={pop.toggle}>
           {value === 'dark' ? <MoonIcon size={16} /> : <SunIcon size={16} />}
           <CaretIcon size={11} style={{ transform: pop.open ? 'rotate(180deg)' : undefined }} />
         </button>
       </Tip>
       <Popover pop={pop} dark={dark}>
-        {CONFIG.themes.map((t) => (
-          <button key={t} onClick={() => pick(t)}>
-            {t === 'dark' ? <MoonIcon size={15} /> : <SunIcon size={15} />}
-            <span>{t}</span>
-            {tick === t && <CheckIcon size={13} className="chk" />}
+        {CONFIG.themes.map((theme) => (
+          <button key={theme} onClick={() => pick(theme)}>
+            {theme === 'dark' ? <MoonIcon size={15} /> : <SunIcon size={15} />}
+            <span>{themeLabel(theme)}</span>
+            {tick === theme && <CheckIcon size={13} className="chk" />}
           </button>
         ))}
       </Popover>

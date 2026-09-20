@@ -30,7 +30,8 @@ function fixture(branding = false): string {
   // the canvas was served, which pre-auth is exactly the failure we are hunting.
   writeFileSync(join(dist, 'index.html'),
     '<!doctype html><html><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>')
-  writeFileSync(join(dist, 'meta.json'), JSON.stringify({ name: 'Fixture', branding }))
+  // 既有门禁断言固定在英文；中文默认与插值由 i18n.test.ts 单独验证。
+  writeFileSync(join(dist, 'meta.json'), JSON.stringify({ name: 'Fixture', branding, locale: 'en' }))
   // A real asset, so cache headers can be checked on a file that EXISTS - the
   // gate's own no-store would otherwise mask a wrong header on real content.
   mkdirSync(join(dist, 'assets'), { recursive: true })

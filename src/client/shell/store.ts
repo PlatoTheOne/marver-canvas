@@ -3,6 +3,7 @@ import { ROUTE, slideSize } from '../const.ts'
 import { tidy, parseLayout, type BoardLayout, type TidyNode } from './tidy.ts'
 import { clearNoteHeights, noteHeight, noteReserve, notesCramped, setNoteHeight } from './notes.ts'
 import { stableNodeKey } from './keys.ts'
+import { t } from '../../shared/i18n.ts'
 // @ts-expect-error virtual module provided by the plugin
 import shConfig from 'virtual:sh-config'
 // @ts-expect-error virtual module: null in dev; a published build inlines manifest+boards
@@ -96,7 +97,7 @@ export interface JamNote {
 }
 export interface Toast { id: number; text: string; jam?: JamNote }
 
-export const CONFIG: { viewports: Record<string, { width: number; height: number }>; themes: string[]; zoomSpeed?: number; noTheme: boolean; setup?: boolean; projectName?: string; branding?: boolean } = shConfig
+export const CONFIG: { locale?: string; viewports: Record<string, { width: number; height: number }>; themes: string[]; zoomSpeed?: number; noTheme: boolean; setup?: boolean; projectName?: string; branding?: boolean } = shConfig
 
 /** Invariant: `branding: false` strips every Marver mention - new chrome included. */
 export const BRANDING = CONFIG.branding !== false
@@ -155,7 +156,7 @@ export async function fetchBoardTree(): Promise<TreeSnapshot> {
     fetch(`${ROUTE}/api/boards`).then((r) => r.json()) as Promise<{ name: string; sha256: string; order?: number; folder?: string; title?: string }[]>,
     fetch(`${ROUTE}/api/folders`).then(async (r) => {
       const j = await r.json() as { folders?: { name: string; order?: number; title?: string }[]; sha256?: string | null; error?: string }
-      if (!r.ok) throw new Error(j?.error ?? `folders ${r.status}`)
+      if (!r.ok) throw new Error(j?.error ? t(j.error) : t('folders {{status}}', { status: r.status }))
       return j
     }),
   ])
@@ -281,7 +282,8 @@ const effectiveLayout = (layout: BoardLayout | null, sceneRows: string[][] | nul
 
 const layoutWarn = (msg: string) => {
   console.warn('[marver layout]', msg)
-  try { useStore.getState().toast(`layout: ${msg}`) } catch { /* store not ready during boot */ }
+  // 布局解析消息来自 Marver；先翻译消息，再放进带命名变量的提示模板。
+  try { useStore.getState().toast(t('layout: {{message}}', { message: t(msg) })) } catch { /* store not ready during boot */ }
 }
 
 
@@ -678,7 +680,7 @@ export const useStore = create<State>((set, get) => {
       const revAtStart = editRev, scenesAtStart = scenesRev
       const next = await loadBoardState(boardName)
       if (seq !== loadSeq) return false        // a newer load superseded this one
-      if (!next) { get().toast(`board "${boardName}" failed to load`); return false }
+      if (!next) { get().toast(t('board "{{board}}" failed to load', { board: boardName })); return false }
       // the user kept editing while we fetched - their newer state wins over the reload
       if (get().board !== boardName || editRev !== revAtStart) return false
       const live = get().manifest             // a WS manifest update may have landed mid-fetch
@@ -704,16 +706,16 @@ export const useStore = create<State>((set, get) => {
       let ok = true
       for (let i = 0; i < 5 && get().dirty && ok; i++) { clearTimeout(saveTimer); ok = await get().save() }
       if (mySwitch !== switchSeq) return
-      if (get().dirty) { get().toast('current board could not be saved - staying here'); return }
+      if (get().dirty) { get().toast(t('current board could not be saved - staying here')); return }
       // load the target while the current board stays mounted; commit atomically on success -
       // there is never an empty intermediate state and nothing to roll back
       const next = await loadBoardState(name)
       if (mySwitch !== switchSeq) return
-      if (!next) { get().toast(`could not load "${name}" - staying on ${get().board}`); return }
+      if (!next) { get().toast(t('could not load "{{board}}" - staying on {{current}}', { board: name, current: get().board })); return }
       // edits may have landed on the still-mounted old board during the target load
       for (let i = 0; i < 5 && get().dirty && ok; i++) { clearTimeout(saveTimer); ok = await get().save() }
       if (mySwitch !== switchSeq) return
-      if (get().dirty) { get().toast('current board could not be saved - staying here'); return }
+      if (get().dirty) { get().toast(t('current board could not be saved - staying here')); return }
       clearTimeout(saveTimer)                  // a scheduled-but-clean timer must not fire against the new board
       ++loadSeq                                // invalidate any in-flight boot of the old board
       const live = get().manifest              // a WS manifest update may have landed mid-load
@@ -733,7 +735,7 @@ export const useStore = create<State>((set, get) => {
         if (active) {
           let ok = true
           for (let i = 0; i < 5 && get().dirty && ok; i++) { clearTimeout(saveTimer); ok = await get().save() }
-          if (get().dirty) return { ok: false, error: 'unsaved changes - try again' }
+          if (get().dirty) return { ok: false, error: t('unsaved changes - try again') }
           // hold autosave across the round-trip: an edit landing mid-write would PUT against a
           // hash the rewrite is about to move
           holdSaves()
@@ -744,9 +746,9 @@ export const useStore = create<State>((set, get) => {
           const base = active && get().boardHash ? get().boardHash : baseHash
           let res: Response
           try { res = await postOwner('boards/rename', { from, title, ...(base ? { baseHash: base } : {}) }) }
-          catch { return { ok: false, error: 'could not reach the dev server' } }
+          catch { return { ok: false, error: t('could not reach the dev server') } }
           const body = await res.json().catch(() => ({} as { error?: string; sha256?: string }))
-          if (!res.ok) return { ok: false, stale: res.status === 409, error: body?.error ?? `rename failed (${res.status})` }
+          if (!res.ok) return { ok: false, stale: res.status === 409, error: body?.error ? t(body.error) : t('rename failed ({{status}})', { status: res.status }) }
           // the write rewrote the file: the active board's CAS token moves to the hash the server
           // answered (else the next autosave 409s against our own write) - before releasing the hold
           if (active && get().board === from && body?.sha256) set({ boardHash: body.sha256 })
@@ -761,8 +763,8 @@ export const useStore = create<State>((set, get) => {
     async renameScene(scene, title) {
       let res: Response
       try { res = await postOwner('scenes/rename', { scene, title }) }
-      catch { return { ok: false, error: 'could not reach the dev server' } }
-      if (!res.ok) { const e = await res.json().catch(() => ({} as { error?: string })); return { ok: false, error: e?.error ?? `rename failed (${res.status})` } }
+      catch { return { ok: false, error: t('could not reach the dev server') } }
+      if (!res.ok) { const e = await res.json().catch(() => ({} as { error?: string })); return { ok: false, error: e?.error ? t(e.error) : t('rename failed ({{status}})', { status: res.status }) } }
       // the label changes now; the watcher's sh:scenes confirms it from the file
       const m = get().manifest
       if (m) set({ manifest: { ...m, scenes: m.scenes.map((s) => (s.name === scene ? { ...s, ...(title ? { title } : {}), ...(title ? {} : { title: undefined }) } : s)) } })
@@ -787,7 +789,7 @@ export const useStore = create<State>((set, get) => {
       return structural(async () => {
         let ok = true
         for (let i = 0; i < 5 && get().dirty && ok; i++) { clearTimeout(saveTimer); ok = await get().save() }
-        if (get().dirty) return { ok: false as const, stale: false, error: 'unsaved changes - try again' }
+        if (get().dirty) return { ok: false as const, stale: false, error: t('unsaved changes - try again') }
         holdSaves()
         try {
           // the active board's hash is freshest in the store (an autosave may have landed since
@@ -796,9 +798,9 @@ export const useStore = create<State>((set, get) => {
           const boards = { ...base.boards, ...(get().boardHash && base.boards[active] !== undefined ? { [active]: get().boardHash } : {}) }
           let res: Response
           try { res = await postOwner('boards/reorder', { tree: toWire(tree), base: { boards, folders: base.folders } }) }
-          catch { return { ok: false as const, stale: false, error: 'could not reach the dev server' } }
+          catch { return { ok: false as const, stale: false, error: t('could not reach the dev server') } }
           const body = await res.json().catch(() => ({} as { error?: string; sha256?: { boards?: Record<string, string> } }))
-          if (!res.ok) return { ok: false as const, stale: res.status === 409, error: body?.error }
+          if (!res.ok) return { ok: false as const, stale: res.status === 409, error: body?.error ? t(body.error) : body?.error }
           const sha = body?.sha256?.boards?.[get().board]
           if (sha) set({ boardHash: sha })
           return { ok: true as const }
@@ -841,7 +843,7 @@ export const useStore = create<State>((set, get) => {
         next.push(node)
         // in a device view, the snapshot learns the newcomer's DEFAULT size so 0 restores it sanely
         if (vp && nextBase) nextBase = { ...nextBase, [node.key]: { x: node.x, y: node.y, w: d.w, h: d.h } }
-        toast(`agent added ${f.id}`)
+        toast(t('agent added {{frame}}', { frame: f.id }))
         changed = true
       }
       const live = new Set(m.frames.map((f) => f.id))
@@ -886,7 +888,9 @@ export const useStore = create<State>((set, get) => {
         const dropped = next.length - final.length
         if (dropped) {
           changed = true
-          toast(dropped === 1 ? 'removed 1 deleted frame' : `removed ${dropped} deleted frames`)
+          toast(dropped === 1
+            ? t('removed 1 deleted frame')
+            : t('removed {{count}} deleted frames', { count: dropped }))
         }
       }
       set((s) => ({
@@ -1190,9 +1194,9 @@ export const useStore = create<State>((set, get) => {
       const node = s.nodes.find((n) => n.key === s.selection[0])
       if (!node || node.missing) return
       const frame = s.frameFor(node)
-      if (!frame) { s.toast('frame is still indexing - try again in a second'); return }
+      if (!frame) { s.toast(t('frame is still indexing - try again in a second')); return }
       const CI = (globalThis as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem
-      if (!CI || !navigator.clipboard?.write || (CI.supports && !CI.supports('image/png'))) { s.toast("this browser can't put images on the clipboard - use Chrome, Edge or Safari"); return }
+      if (!CI || !navigator.clipboard?.write || (CI.supports && !CI.supports('image/png'))) { s.toast(t("this browser can't put images on the clipboard - use Chrome, Edge or Safari")); return }
       set({ imageBusy: true })
       const done = () => set({ imageBusy: false })
       const qs = new URLSearchParams({ frame: frame.id, theme: node.theme, scale: String(scale), w: String(Math.round(node.w)), h: String(Math.round(node.h)), format: 'png' })
@@ -1202,25 +1206,34 @@ export const useStore = create<State>((set, get) => {
       const timer = setTimeout(() => ctl.abort(), 60_000)
       let meta: { scale?: number; note?: string } = {}
       const png = fetch(`${ROUTE}/api/shot?${qs}`, { headers: { 'x-mv-c': csrf() }, signal: ctl.signal }).then(async (r) => {
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `shot failed (${r.status})`)
+        if (!r.ok) {
+          const error = (await r.json().catch(() => ({}))).error
+          throw new Error(error ? t(String(error)) : t('shot failed ({{status}})', { status: r.status }))
+        }
         try { meta = JSON.parse(atob((r.headers.get('x-mv-shot') ?? '').replace(/-/g, '+').replace(/_/g, '/'))) } catch { /* summary is advisory */ }
         return r.blob()
       }).finally(() => clearTimeout(timer))
       let renderErr = ''
-      png.catch((e: Error) => { renderErr = e.name === 'AbortError' ? 'timed out - the renderer is busy' : e.message })
+      png.catch((e: Error) => { renderErr = e.name === 'AbortError' ? t('timed out - the renderer is busy') : e.message })
       const fail = (err: unknown) => {
         done()
         // a prompt clipboard refusal (no gesture, focus lost) must not wait a minute on the
         // render: abandon the fetch, toast now. A render failure surfaces its own cause.
         if (!renderErr) ctl.abort()
-        s.toast(renderErr ? `render failed - ${renderErr}` : (err as Error)?.name === 'NotAllowedError' ? 'copy blocked - click the canvas first' : `copy failed - ${(err as Error)?.message ?? err}`)
+        s.toast(renderErr
+          ? t('render failed - {{message}}', { message: renderErr })
+          : (err as Error)?.name === 'NotAllowedError'
+            ? t('copy blocked - click the canvas first')
+            : t('copy failed - {{message}}', { message: (err as Error)?.message ?? String(err) }))
       }
       try {
         navigator.clipboard.write([new CI({ 'image/png': png })]).then(
           () => {
             done()
             const used = meta.scale ?? scale
-            s.toast(used < scale ? `image copied at ${used}x - frame too tall for ${scale}x` : scale === 4 ? 'image copied (4x)' : 'image copied')
+            s.toast(used < scale
+              ? t('image copied at {{used}}x - frame too tall for {{requested}}x', { used, requested: scale })
+              : scale === 4 ? t('image copied (4x)') : t('image copied'))
             set((st) => ({ imagePulse: st.imagePulse + 1 }))
           },
           fail)
@@ -1262,7 +1275,7 @@ export const useStore = create<State>((set, get) => {
      *  supersedes), capped so the stack stays small. */
     jamToast(note) {
       const id = ++toastSeq
-      const text = note.kind === 'mention' ? 'You were mentioned' : note.kind === 'reply' ? 'New reply' : 'Marver replied'
+      const text = note.kind === 'mention' ? t('You were mentioned') : note.kind === 'reply' ? t('New reply') : t('Marver replied')
       set((s) => ({ toasts: [...s.toasts.filter((t) => t.jam?.threadId !== note.threadId), { id, text, jam: note }].slice(-8) }))
     },
     dismissToast(id) { set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })) },
@@ -1289,7 +1302,7 @@ export const useStore = create<State>((set, get) => {
         ...(vp && baseLayout ? { baseLayout: { ...baseLayout, [node.key]: { x: node.x, y: node.y, w: d.w, h: d.h } } } : {}),
       }))
       scheduleSave()
-      get().toast(`added ${f.id}`)
+      get().toast(t('added {{frame}}', { frame: f.id }))
       return node
     },
 
@@ -1357,11 +1370,11 @@ export const useStore = create<State>((set, get) => {
             if (info?.gone) {
               // renamed/deleted externally - drop the write, don't recreate it or loop
               set({ dirty: false })
-              get().toast('this board was renamed or removed - not recreating it')
+              get().toast(t('this board was renamed or removed - not recreating it'))
               return true
             }
             const reloaded = await get().boot()   // hash advances only when the authoritative reload commits
-            if (reloaded) get().toast('board changed on disk - canvas layout reloaded')
+            if (reloaded) get().toast(t('board changed on disk - canvas layout reloaded'))
             return reloaded   // false keeps dirty set; the next debounce retries once edits settle
           }
           if (res.ok) {

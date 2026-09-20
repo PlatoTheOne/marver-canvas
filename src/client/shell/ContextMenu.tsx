@@ -1,20 +1,24 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore, SOURCE_REVEALED } from './store.ts'
+import { t } from '../../shared/i18n.ts'
 
 /** Copy text to the clipboard, toasting the outcome. Success is confirmed out loud; a
  *  blocked clipboard (no user gesture / permission) says so instead of failing silently. */
 export function copyToClipboard(text: string, okMsg: string) {
   const { toast } = useStore.getState()
-  navigator.clipboard.writeText(text).then(() => toast(okMsg), () => toast('copy blocked - click the canvas first'))
+  navigator.clipboard.writeText(text).then(() => toast(okMsg), () => toast(t('copy blocked - click the canvas first')))
 }
 
 /** The address a frame copies - the same string from the sidebar right-click, the floating
  *  toolbar, and ⇧P: the board it sits on, the frame id, and its file. */
 // stripped build: the file column would only show the opaque token, so the
 // copy keeps what is still honest - the board and the frame id
+// 只翻译路径字段名，用户自己的画板名、画面 ID 与文件名保持原样。
 export const framePath = (board: string, f: { id: string; file: string }) =>
-  SOURCE_REVEALED ? `board: ${board} · frame: ${f.id}  (${f.file})` : `board: ${board} · frame: ${f.id}`
+  SOURCE_REVEALED
+    ? t('board: {{board}} · frame: {{frame}}  ({{file}})', { board, frame: f.id, file: f.file })
+    : t('board: {{board}} · frame: {{frame}}', { board, frame: f.id })
 
 export type MenuItem = { label: string; icon: ReactNode; onClick: () => void }
 export type MenuState = { x: number; y: number; items: MenuItem[] }

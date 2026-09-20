@@ -678,7 +678,7 @@ export async function buildSite(root: string, boardsFlag?: string, allBoardsFlag
   }
   // rights ride in meta.json so serve can enforce the policy on comment APIs without parsing the bundle - hiding UI controls is not authorization
   writeFileSync(join(outDir, 'meta.json'), JSON.stringify({
-    name, branding: config.share.branding, logo, rights,
+    name, branding: config.share.branding, logo, rights, locale: config.locale,
     boards: boardsMeta, reveal: policy.reveal,
     ...(config.share.frontDoor === false ? { frontDoor: false } : {}),
     ...(config.share.notify === false ? { notify: false } : {}),

@@ -17,6 +17,7 @@ import { Tip } from './Tip.tsx'
 import { mentionAlerts, mentionPeople, mentionQueryAt, parseBody, type MentionPerson } from './mentions.ts'
 import { ROUTE } from '../const.ts'
 import type { AgentMeta, Thread } from '../../shared/events.ts'
+import { t } from '../../shared/i18n.ts'
 
 /** Tint the pin / composer / thread card EDGES (border, outline, focus ring) in the anchored
  *  element's own laser hue (captured at pick as anchor.el.hue) via --cm-line/--cm-line-ring.
@@ -39,12 +40,13 @@ export function hueVars(hue?: number): React.CSSProperties {
 }
 const anchorHue = (a: unknown): number | undefined => (a as any)?.el?.hue
 
+// 相对时间也走统一翻译入口；数量只作为模板变量，不改变用户内容。
 const rel = (ts: number) => {
   const m = Math.round((Date.now() - ts) / 60_000)
-  if (m < 1) return 'now'
-  if (m < 60) return `${m}m`
-  if (m < 24 * 60) return `${Math.round(m / 60)}h`
-  return `${Math.round(m / 1440)}d`
+  if (m < 1) return t('now')
+  if (m < 60) return t('{{count}}m', { count: m })
+  if (m < 24 * 60) return t('{{count}}h', { count: Math.round(m / 60) })
+  return t('{{count}}d', { count: Math.round(m / 1440) })
 }
 
 /** The Marver mark avatar: accent-blue disc + the solid white parallelogram. One place, reused
@@ -291,16 +293,16 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
 
   return (
     <>
-      {open.map((t) => {
-        const { x, y, orphan } = pinPos(t)
-        const isActive = t.id === active
+      {open.map((thread) => {
+        const { x, y, orphan } = pinPos(thread)
+        const isActive = thread.id === active
         return (
-          <div key={t.id} className={`cm-pin sh-no-pan${isActive ? ' on' : ''}${isActive && cardSide === 'r' ? ' tail-r' : ''}${orphan ? ' orphan' : ''}${alertIds.has(t.id) ? ' mention' : ''}`}
-            style={{ left: x, top: y, ...hueVars(anchorHue(t.anchor)) }}
+          <div key={thread.id} className={`cm-pin sh-no-pan${isActive ? ' on' : ''}${isActive && cardSide === 'r' ? ' tail-r' : ''}${orphan ? ' orphan' : ''}${alertIds.has(thread.id) ? ' mention' : ''}`}
+            style={{ left: x, top: y, ...hueVars(anchorHue(thread.anchor)) }}
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); setActive(t.id === active ? null : t.id) }}
-            title={orphan ? 'the anchored element is gone - comment parked' : undefined}>
-            <MarkerFace threads={[t]} />
+            onClick={(e) => { e.stopPropagation(); setActive(thread.id === active ? null : thread.id) }}
+            title={orphan ? t('the anchored element is gone - comment parked') : undefined}>
+            <MarkerFace threads={[thread]} />
           </div>
         )
       })}
@@ -320,8 +322,6 @@ export function CommentLayer({ node, frameId, iframe }: { node: Node; frameId: s
 /** The open thread card - shared by canvas (bounds = node size, `at` in frame coords) and
  *  prototype (bounds = the on-screen stage size, `at` in screen coords). Geometry only. */
 // ---- Live Jam: @marver rendering + Marver identity ----------------------
-
-const AT_TIP = "Read like any other comment. Marver won't act on this unless the owner promotes it."
 
 /** The mentionable set, derived from everything the client has seen (published:
  *  projected ids + names; dev: canonical emails). The viewer themself is out -
@@ -367,7 +367,7 @@ function CommentBody({ body, owner }: { body?: string; owner: boolean }) {
           ? <span key={i}>{s.text}</span>
           : owner
             ? <span key={i} className="cm-at owner">{s.text}</span>
-            : <Tip key={i} side="top" label={<span className="cm-at-tip">{AT_TIP}</span>}><span className="cm-at">{s.text}</span></Tip>)}
+            : <Tip key={i} side="top" label={<span className="cm-at-tip">{t("Read like any other comment. Marver won't act on this unless the owner promotes it.")}</span>}><span className="cm-at">{s.text}</span></Tip>)}
     </p>
   )
 }
@@ -383,10 +383,10 @@ function prettyModel(m: string): string {
  *  One row per fact, left-aligned, bold label + regular value - the house tooltip treatment. */
 function AgentMetaTip({ meta }: { meta?: AgentMeta }) {
   const rows = [
-    meta?.devUser && ['Dev user', meta.devUser],
-    meta?.harness && ['Harness', HARNESS[meta.harness] ?? meta.harness],
-    meta?.model && ['Model', prettyModel(meta.model)],
-    meta?.effort && ['Effort', meta.effort],
+    meta?.devUser && [t('Dev user'), meta.devUser],
+    meta?.harness && [t('Harness'), HARNESS[meta.harness] ?? meta.harness],
+    meta?.model && [t('Model'), prettyModel(meta.model)],
+    meta?.effort && [t('Effort'), meta.effort],
   ].filter(Boolean) as [string, string][]
   if (!rows.length) return <b>Marver</b>
   // Toolbar-tooltip treatment: the VALUE is bold + bright (what you scan), the label is a muted
@@ -423,7 +423,7 @@ function MessageHead({ author, agent, agentMeta, ts }: { author?: Thread['author
   return (
     <header>
       {unset && own ? <EditableAvatar author={author} size={24} /> : <Avatar author={author} size={24} />}
-      <b>{shown?.name ?? 'Someone'}</b>
+      <b>{shown?.name ?? t('Someone')}</b>
       <span className="dim">{rel(ts)}</span>
     </header>
   )
@@ -511,7 +511,7 @@ function CommentInput({ value, onChange, onSubmit, onCancel, placeholder, autoFo
             e.preventDefault(); void submit()                                                 // Enter / Cmd·Ctrl+Enter send
           }
         }} />
-      <Tip side="top" label={<b>⏎ send · ⇧⏎ new line</b>}>
+      <Tip side="top" label={<b>{t('⏎ send · ⇧⏎ new line')}</b>}>
         <button className="cm-send" disabled={busy || !value.trim()} aria-label={sendLabel} onClick={() => void submit()}>
           <ArrowUpIcon size={15} />
         </button>
@@ -547,26 +547,26 @@ function ProfileDialog({ onClose }: { onClose: () => void }) {
     <div className="cm-modal-wrap" onClick={onClose} onPointerDown={(e) => e.stopPropagation()}>
       <div className="cm-modal" onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Escape') onClose() }}>
-        <h2>{unset ? 'Set up your profile' : 'Edit your profile'}</h2>
+        <h2>{unset ? t('Set up your profile') : t('Edit your profile')}</h2>
         <p className="dim">
           {connected
-            ? <>Your name comes from your connect account. The photo stays on this machine.</>
-            : <>Comments carry your name and photo. Saved to design/.local on this machine - yours, nowhere else.</>}
+            ? <>{t('Your name comes from your connect account. The photo stays on this machine.')}</>
+            : <>{t('Comments carry your name and photo. Saved to design/.local on this machine - yours, nowhere else.')}</>}
         </p>
         <div className="cm-fields">
           <div className="cm-idrow">
             <AvatarPick value={avatar} onPick={setAvatar} />
             {connected
-              ? <div className="cm-chip" style={{ flex: 1 }}><b>{me?.name}</b><span>CONNECT</span></div>
-              : <input placeholder="Set a display name" style={{ flex: 1 }} value={name}
+              ? <div className="cm-chip" style={{ flex: 1 }}><b>{me?.name}</b><span>{t('CONNECT')}</span></div>
+              : <input placeholder={t('Set a display name')} style={{ flex: 1 }} value={name}
                   onChange={(e) => setName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && void save()} />}
           </div>
         </div>
         {err && <span className="cm-err">{err}</span>}
         <div className="cm-row">
-          <button className="cm-primary" disabled={busy || !ready} onClick={() => void save()}>Save</button>
-          <button onClick={onClose}>Not now</button>
+          <button className="cm-primary" disabled={busy || !ready} onClick={() => void save()}>{t('Save')}</button>
+          <button onClick={onClose}>{t('Not now')}</button>
         </div>
       </div>
     </div>,
@@ -582,8 +582,8 @@ function EditableAvatar({ author, size = 24 }: { author?: Thread['author']; size
   const [open, setOpen] = useState(false)
   return (
     <span className="cm-me">
-      <Tip side="top" label={<b>Edit your profile</b>}>
-        <button className="cm-mebtn" aria-label="Edit your profile" onClick={() => setOpen(true)}>
+      <Tip side="top" label={<b>{t('Edit your profile')}</b>}>
+        <button className="cm-mebtn" aria-label={t('Edit your profile')} onClick={() => setOpen(true)}>
           <Avatar author={author} size={size} />
           <span className="cm-pen-face"><PencilSimpleIcon size={Math.round(size * 0.55)} /></span>
         </button>
@@ -721,7 +721,7 @@ export function ThreadCard({ thread, at, bounds, nodeKey, side = 'r', flank, sta
       {/* thread-level actions pin to the card corner, out of the header's flow -
           the name row never has to share its line with them */}
       <div className="cm-actions">
-        <Tip side="bottom" label={<b>{copied ? 'Copied' : 'Copy link'}</b>}>
+        <Tip side="bottom" label={<b>{copied ? t('Copied') : t('Copy link')}</b>}>
           <button className={`cm-icon cm-copy${copied ? ' ok' : ''}`} onClick={() => {
             const url = `${location.origin}${location.pathname}${buildHash({ board: useStore.getState().board, c: thread.id })}`
             // the check means "it's on your clipboard" - only show it when that's true
@@ -729,16 +729,16 @@ export function ThreadCard({ thread, at, bounds, nodeKey, side = 'r', flank, sta
               setCopied(true)
               clearTimeout(copyTimer.current)
               copyTimer.current = setTimeout(() => setCopied(false), 1600)
-            }, () => useStore.getState().toast('copy blocked - try again'))
+            }, () => useStore.getState().toast(t('copy blocked - try again')))
           }}>
             <span className="a"><LinkIcon size={15} /></span>
             <span className="b"><CheckIcon size={16} /></span>
           </button>
         </Tip>
-        <Tip side="bottom" label={<b>Resolve</b>}>
+        <Tip side="bottom" label={<b>{t('Resolve')}</b>}>
           <button className="cm-icon" onClick={() => { void resolve(thread.id); setActive(null) }}><CheckSquareOffsetIcon size={16} /></button>
         </Tip>
-        <Tip side="bottom" label={<b>Close</b>}>
+        <Tip side="bottom" label={<b>{t('Close')}</b>}>
           <button className="cm-icon" onClick={() => setActive(null)}><XIcon size={15} /></button>
         </Tip>
       </div>
@@ -758,11 +758,11 @@ export function ThreadCard({ thread, at, bounds, nodeKey, side = 'r', flank, sta
       {canComment ? (
         <div className="cm-compose">
           <ComposeAvatar />
-          <CommentInput value={text} onChange={setText} onSubmit={submit} onCancel={() => setActive(null)} placeholder="Reply…" sendLabel="Send" owner={local} />
+          <CommentInput value={text} onChange={setText} onSubmit={submit} onCancel={() => setActive(null)} placeholder={t('Reply…')} sendLabel={t('Send')} owner={local} />
         </div>
       ) : (
         <button className="cm-signin-cta" onClick={() => useComments.setState({ needsIdentity: true })}>
-          Sign in to comment
+          {t('Sign in to comment')}
         </button>
       )}
     </div>
@@ -782,7 +782,7 @@ export function DraftComposer({ at, bounds, hue }: { at: { x: number; y: number 
       onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
       {/* the draft is JUST the tight pill - no avatar chrome on a first comment */}
       <div className="cm-compose">
-        <CommentInput value={text} onChange={setText} onSubmit={() => create(text)} onCancel={() => setDraft(null)} placeholder="Comment on this element…" autoFocus sendLabel="Comment" owner={local} />
+        <CommentInput value={text} onChange={setText} onSubmit={() => create(text)} onCancel={() => setDraft(null)} placeholder={t('Comment on this element…')} autoFocus sendLabel={t('Comment')} owner={local} />
       </div>
     </div>
   )
@@ -807,8 +807,8 @@ function AvatarPick({ value, onPick }: { value: string; onPick: (dataUri: string
   }
   return (
     <>
-      <Tip side="top" label={<b>{value ? 'Change your photo' : 'Select or upload a profile picture'}</b>}>
-        <button className={`cm-pfp${value ? ' set' : ''}`} aria-label="Select or upload a profile picture"
+      <Tip side="top" label={<b>{value ? t('Change your photo') : t('Select or upload a profile picture')}</b>}>
+        <button className={`cm-pfp${value ? ' set' : ''}`} aria-label={t('Select or upload a profile picture')}
           onClick={() => fileRef.current?.click()}>
           {value ? <img src={value} alt="" /> : <PlusIcon size={16} />}
         </button>
@@ -847,8 +847,8 @@ export function IdentityDialog() {
     ? !!(password.trim() && name.trim() && (invite || token.trim()))
     : !!(email.trim() && password.trim())
   const missing = claiming
-    ? (invite ? 'Password and display name still needed' : 'Token, password, and display name still needed')
-    : 'Fill in email and password'
+    ? (invite ? t('Password and display name still needed') : t('Token, password, and display name still needed'))
+    : t('Fill in email and password')
   const go = async () => {
     if (!ready) return
     setErr(null)
@@ -861,34 +861,34 @@ export function IdentityDialog() {
   return (
     <div className="cm-modal-wrap" onClick={dismissIdentity}>
       <div className="cm-modal" onClick={(e) => e.stopPropagation()}>
-        <h2>{invite ? 'You’re invited to comment' : claiming ? 'Sign up to comment' : 'Sign in to comment'}</h2>
+        <h2>{invite ? t('You’re invited to comment') : claiming ? t('Sign up to comment') : t('Sign in to comment')}</h2>
         <p className="dim">
           {invite
-            ? <>Pick how you’ll appear - comments carry your name.</>
+            ? <>{t('Pick how you’ll appear - comments carry your name.')}</>
             : claiming
-              ? <>Create your account with the invite token your admin sent you.</>
-              : <>You’re in read-only. Sign in to your account to comment on this canvas.</>}
+              ? <>{t('Create your account with the invite token your admin sent you.')}</>
+              : <>{t('You’re in read-only. Sign in to your account to comment on this canvas.')}</>}
         </p>
         <div className="cm-fields">
           {claiming ? (
             <>
               {invite
-                ? invitedAs && <div className="cm-chip"><b>{invitedAs}</b><span>INVITED</span></div>
-                : <input placeholder="Invite token" value={token} onChange={(e) => setToken(e.target.value)} />}
-              <input placeholder="Choose a password" type="password" autoComplete="new-password"
+                ? invitedAs && <div className="cm-chip"><b>{invitedAs}</b><span>{t('INVITED')}</span></div>
+                : <input placeholder={t('Invite token')} value={token} onChange={(e) => setToken(e.target.value)} />}
+              <input placeholder={t('Choose a password')} type="password" autoComplete="new-password"
                 value={password} onChange={(e) => setPassword(e.target.value)} />
               <hr className="cm-div" />
               <div className="cm-idrow">
                 <AvatarPick value={avatar} onPick={setAvatar} />
-                <input placeholder="Set a display name" style={{ flex: 1 }}
+                <input placeholder={t('Set a display name')} style={{ flex: 1 }}
                   value={name} onChange={(e) => setName(e.target.value)} onKeyDown={onEnter} />
               </div>
             </>
           ) : (
             <>
-              <input placeholder="Email" type="email" autoComplete="email"
+              <input placeholder={t('Email')} type="email" autoComplete="email"
                 value={email} onChange={(e) => setEmail(e.target.value)} />
-              <input placeholder="Password" type="password" autoComplete="current-password"
+              <input placeholder={t('Password')} type="password" autoComplete="current-password"
                 value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={onEnter} />
             </>
           )}
@@ -897,20 +897,20 @@ export function IdentityDialog() {
         <div className="cm-row">
           {ready ? (
             <button className="cm-primary" onClick={() => void go()}>
-              {claiming ? (invite ? 'Join the canvas' : 'Create account') : 'Sign in'}
+              {claiming ? (invite ? t('Join the canvas') : t('Create account')) : t('Sign in')}
             </button>
           ) : (
             <Tip side="top" label={<b>{missing}</b>}>
               <button className="cm-primary" disabled>
-                {claiming ? (invite ? 'Join the canvas' : 'Create account') : 'Sign in'}
+                {claiming ? (invite ? t('Join the canvas') : t('Create account')) : t('Sign in')}
               </button>
             </Tip>
           )}
-          <button onClick={dismissIdentity}>Not now</button>
+          <button onClick={dismissIdentity}>{t('Not now')}</button>
         </div>
         {!invite && (
           <button className="cm-switch" onClick={() => { setErr(null); setMode(mode === 'signin' ? 'claim' : 'signin') }}>
-            {mode === 'signin' ? 'Have an invite token instead?' : 'Already have an account? Sign in'}
+            {mode === 'signin' ? t('Have an invite token instead?') : t('Already have an account? Sign in')}
           </button>
         )}
       </div>

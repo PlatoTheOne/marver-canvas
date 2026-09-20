@@ -11,9 +11,13 @@ import { sleep, wake } from './sleep.ts'
 import { canAutoReload, shouldArmReadyWatch } from './ready-watch.ts'
 import { Stickies, type NoteSpec } from './Sticky.tsx'
 import { noteId, sceneNoteHost } from '../notes.ts'
+import { t } from '../../../shared/i18n.ts'
 
 export const HEADER = 28
 const SNAP = 12
+
+/** 只翻译内建主题名，项目配置的自定义主题名保持原样。 */
+const themeLabel = (name: string) => name === 'light' ? t('Light') : name === 'dark' ? t('Dark') : name === 'default' ? t('Default') : name
 
 /** Live Jam working shimmer: a slim 2x6 strip of tiny marver marks on the frame's left
  *  flank, top-aligned - each mark twinkles on its own scattered beat, phased per frame by
@@ -333,15 +337,15 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
         style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: node.w, height: node.h + HEADER }}
         data-node={node.key}>
         <div className="sh-node-head sh-no-pan" onPointerDown={(e) => drag(e, 'move')}>
-          <span className="id sh-no-pan">{node.frame}</span><span className="dim sh-no-pan">deleted</span>
+          <span className="id sh-no-pan">{node.frame}</span><span className="dim sh-no-pan">{t('deleted')}</span>
         </div>
         <div className="sh-node-body" style={{ height: node.h }}>
           <div className="sh-card warn sh-no-pan">
-            <b>file deleted</b>
+            <b>{t('file deleted')}</b>
             <span className="dim">{node.frame}</span>
             <span className="row">
               <button className="sh-no-pan" onClick={() => useStore.getState().removeNode(node.key)}>
-                <XIcon size={12} /> remove from board
+                <XIcon size={12} /> {t('remove from board')}
               </button>
             </span>
           </div>
@@ -370,7 +374,7 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
       {working && <WorkShimmer belowBadge={!!frame.variantGroup} />}
       <Stickies nodeKey={node.key} frameId={frame.id} notes={notes} underBadge={!!frame.variantGroup} />
       {frame.variantGroup && (
-        <div className="sh-vbadge sh-no-pan" title={`${frame.variantGroup} · variant ${frame.variant?.toUpperCase()} - click to select`}
+        <div className="sh-vbadge sh-no-pan" title={t('{{group}} · variant {{variant}} - click to select', { group: frame.variantGroup, variant: frame.variant?.toUpperCase() ?? '' })}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { select(node.key, e.shiftKey) }}>
           <b>{frame.variant?.toUpperCase()}</b>
@@ -380,24 +384,24 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
       <div className="sh-node-head sh-no-pan" onPointerDown={(e) => drag(e, 'move')} title={frame.file}>
         {/* the chrome badge: slide first, else the content intent glyph */}
         {frame.slide
-          ? <SlideFrameIcon size={12} className="iicon sh-no-pan" role="img" aria-hidden={false} aria-label="slide" />
+          ? <SlideFrameIcon size={12} className="iicon sh-no-pan" role="img" aria-hidden={false} aria-label={t('slide')} />
           : frame.intent && <IntentGlyph intent={frame.intent} size={12} className="iicon sh-no-pan" aria-label={frame.intent} />}
         <span className="id sh-no-pan">{frame.title ?? frame.id}</span>
-        <span className="dim sh-no-pan">{Math.round(node.w)} · {node.theme}</span>
+        <span className="dim sh-no-pan">{Math.round(node.w)} · {themeLabel(node.theme)}</span>
       </div>
 
       <div className="sh-node-body" style={{ height: node.h }}>
         {node.status === 'error' ? (
           <div className="sh-card err sh-no-pan">
-            <b>frame failed</b>
+            <b>{t('frame failed')}</b>
             <span className="msg">{node.error}</span>
             <span className="dim">{frame.file}</span>
             <span className="row">
               <button className="sh-no-pan" onClick={() => reload(false)}>
-                <ReloadIcon size={12} /> reload
+                <ReloadIcon size={12} /> {t('reload')}
               </button>
-              <button className="sh-no-pan" onClick={() => { navigator.clipboard.writeText(`${frame.file}: ${node.error}`); toast('error copied for agent') }}>
-                <CopyIcon size={12} /> copy for agent
+              <button className="sh-no-pan" onClick={() => { navigator.clipboard.writeText(`${frame.file}: ${node.error}`); toast(t('error copied for agent')) }}>
+                <CopyIcon size={12} /> {t('copy for agent')}
               </button>
             </span>
           </div>
@@ -406,9 +410,9 @@ export const FrameNode = memo(function FrameNode({ node }: { node: Node }) {
             non-covering pill (not the red card) keeps it honest and offers a manual reload. */}
         {node.status === 'loading' && node.readyRetried ? (
           <div className="sh-loading sh-no-pan">
-            <span>still loading</span>
+            <span>{t('still loading')}</span>
             <button className="sh-no-pan" onClick={() => reload(false)}>
-              <ReloadIcon size={11} /> reload
+              <ReloadIcon size={11} /> {t('reload')}
             </button>
           </div>
         ) : null}

@@ -36,6 +36,7 @@ import { attachAvatar, avatarSourceFor, provisionFromMarverId } from './auth.ts'
 import { fetchAvatar } from './avatar.ts'
 import { TransactionStore, browserBinding, verifyAssertion } from './marver-id.ts'
 import { poweredByUrl } from '../shared/utm.ts'
+import { DEFAULT_LOCALE, htmlLang, translator, type Locale } from '../shared/i18n.ts'
 
 /**
  * Names the browser across the two requests. Not a session - just a handle.
@@ -111,7 +112,7 @@ export function safeHash(raw: string | null): string | null {
   return value
 }
 
-export function marverIdHandler(dir: string, issuer: string, canvasName?: string, branding = true, ceilings: Record<string, 'none' | 'view' | 'comment'> = {}) {
+export function marverIdHandler(dir: string, issuer: string, canvasName?: string, branding = true, ceilings: Record<string, 'none' | 'view' | 'comment'> = {}, locale?: Locale) {
   const transactions = new TransactionStore()
 
   // The canvas's own origin, pinned by the operator.
@@ -230,7 +231,7 @@ export function marverIdHandler(dir: string, issuer: string, canvasName?: string
       res.setHeader('content-security-policy', "frame-ancestors 'none'")
       res.setHeader('x-frame-options', 'DENY')
       res.end(finishPage(canvasName, new URL(origin).host,
-        `${issuer}/switch?origin=${encodeURIComponent(origin)}`, branding))
+        `${issuer}/switch?origin=${encodeURIComponent(origin)}`, branding, locale))
       return true
     }
 
@@ -420,14 +421,16 @@ const esc = (s: string) =>
  * still wearing the footer an operator had explicitly turned off. A setting that
  * holds almost everywhere is a setting you cannot rely on.
  */
-function finishPage(canvasName: string | undefined, host: string, switchUrl: string, branding = true): string {
-  const name = esc(canvasName || 'this canvas')
+function finishPage(canvasName: string | undefined, host: string, switchUrl: string, branding = true, locale?: Locale): string {
+  const resolvedLocale = locale ?? DEFAULT_LOCALE
+  const tr = translator(resolvedLocale)
+  const name = esc(canvasName || tr('this canvas'))
   const where = esc(host)
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8" />
+<html lang="${htmlLang(resolvedLocale)}"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
-<title>Signing in - ${name}</title>
+<title>${esc(tr('Signing in'))} - ${name}</title>
 <link rel="icon" href="/__mv/favicon/favicon.ico" sizes="48x48" />
 <style>
   /* The gate's own tokens. This page is the last thing somebody sees before the
@@ -507,26 +510,26 @@ function finishPage(canvasName: string | undefined, host: string, switchUrl: str
   }
 </style></head>
 <body>
-  <div class="wait" id="wait" role="status" aria-label="Signing you in" hidden></div>
+  <div class="wait" id="wait" role="status" aria-label="${esc(tr('Signing you in'))}" hidden></div>
   <div class="card" id="card" hidden>
     <header>${MARK_LG}<h1 id="t">${name}</h1></header>
     <p class="state" id="s"></p>
     <div class="chip">${where}</div>
     <p class="lead" id="m"></p>
     <p class="lead" id="m2" hidden></p>
-    <a class="cta" id="back" href="/" data-switch="${esc(switchUrl)}" hidden>Use a different account</a>
+    <a class="cta" id="back" href="/" data-switch="${esc(switchUrl)}" hidden>${esc(tr('Use a different account'))}</a>
     <div id="req" hidden>
       <hr class="rdiv" />
-      <p class="lead">Or ask for access - the owner decides who gets in.</p>
+      <p class="lead">${esc(tr('Or ask for access - the owner decides who gets in.'))}</p>
       <div class="rrow">
-        <label class="rchip"><input type="radio" name="rrole" value="view" checked /><span>View</span></label>
-        <label class="rchip"><input type="radio" name="rrole" value="comment" /><span>View + comment</span></label>
+        <label class="rchip"><input type="radio" name="rrole" value="view" checked /><span>${esc(tr('View'))}</span></label>
+        <label class="rchip"><input type="radio" name="rrole" value="comment" /><span>${esc(tr('View + comment'))}</span></label>
       </div>
-      <textarea id="rnote" maxlength="500" rows="2" placeholder="Add a note (optional)"></textarea>
-      <button class="cta" id="rgo" type="button">Request access</button>
+      <textarea id="rnote" maxlength="500" rows="2" placeholder="${esc(tr('Add a note (optional)'))}"></textarea>
+      <button class="cta" id="rgo" type="button">${esc(tr('Request access'))}</button>
     </div>
   </div>
-  ${branding ? `<footer id="mark" hidden><a href="${poweredByUrl(canvasName, 'published-canvas', 'sign-in')}" target="_blank" rel="noopener">${MARK} <span>Powered by <span class="md">Marver.design</span></span> ${ARROW}</a></footer>` : ''}
+  ${branding ? `<footer id="mark" hidden><a href="${poweredByUrl(canvasName, 'published-canvas', 'sign-in')}" target="_blank" rel="noopener">${MARK} <span>${esc(tr('Powered by'))} <span class="md">Marver.design</span></span> ${ARROW}</a></footer>` : ''}
 <script>
 (function () {
   var s = document.getElementById('s'), m = document.getElementById('m'), back = document.getElementById('back')
@@ -581,16 +584,11 @@ function finishPage(canvasName: string | undefined, host: string, switchUrl: str
   /** Refused, and told which account did it. */
   function refused(email) {
     speak()
-    s.textContent = "You haven't been invited"
-    m.textContent = ''
-    m.appendChild(document.createTextNode('You are signed in as '))
-    var b = document.createElement('strong')
-    b.textContent = email
-    m.appendChild(b)
-    m.appendChild(document.createTextNode(', and that address is not on the invite list for this canvas.'))
-    m2.textContent = 'Ask whoever owns it to add you, or sign in with the address they invited.'
+    s.textContent = ${JSON.stringify(tr("You haven't been invited"))}
+    m.textContent = ${JSON.stringify(tr('You are signed in as {{email}}, and that address is not on the invite list for this canvas.'))}.replace('{{email}}', email)
+    m2.textContent = ${JSON.stringify(tr('Ask whoever owns it to add you, or sign in with the address they invited.'))}
     m2.hidden = false
-    back.textContent = 'Use a different account'
+    back.textContent = ${JSON.stringify(tr('Use a different account'))}
     // Signing out happens at the identity service - this canvas cannot reach
     // across origins to do it, and sending them back here would just hand them
     // the same account and the same refusal.
@@ -607,12 +605,7 @@ function finishPage(canvasName: string | undefined, host: string, switchUrl: str
     if (target) {
       var lead = req.querySelector('p.lead')
       if (lead) {
-        lead.textContent = 'Or ask for access - the owner decides. Your request will name what this link pointed at ('
-        var b = document.createElement('code')
-        b.textContent = target
-        b.style.font = '500 11.5px ui-monospace, monospace'
-        lead.appendChild(b)
-        lead.appendChild(document.createTextNode(').'))
+        lead.textContent = ${JSON.stringify(tr('Or ask for access. Your request will include this link target ({{target}}), and the owner will decide.'))}.replace('{{target}}', target)
       }
     }
     go.addEventListener('click', function () {
@@ -625,9 +618,9 @@ function finishPage(canvasName: string | undefined, host: string, switchUrl: str
         body: JSON.stringify({ requestedRole: role, note: note.slice(0, 500) })
       }).then(function () { sent() }, function () { sent() })
       function sent() {
-        go.textContent = 'Request sent'
+        go.textContent = ${JSON.stringify(tr('Request sent'))}
         var lead = req.querySelector('p.lead')
-        if (lead) lead.textContent = 'The owner will review it. If they approve, signing in again will let you straight in.'
+        if (lead) lead.textContent = ${JSON.stringify(tr('The owner will review it. If they approve, signing in again will let you straight in.'))}
       }
     })
   }
@@ -637,7 +630,7 @@ function finishPage(canvasName: string | undefined, host: string, switchUrl: str
   var assertion = location.hash.replace(/^#/, '')
   try { history.replaceState(null, '', location.pathname) } catch (e) {}
 
-  if (!assertion) return stop('Nothing to sign in with', 'That link is incomplete. Start again from the canvas.', 'Back to the canvas')
+  if (!assertion) return stop(${JSON.stringify(tr('Nothing to sign in with'))}, ${JSON.stringify(tr('That link is incomplete. Start again from the canvas.'))}, ${JSON.stringify(tr('Back to the canvas'))})
 
   fetch('/__mv/id/callback', {
     method: 'POST',
@@ -659,20 +652,20 @@ function finishPage(canvasName: string | undefined, host: string, switchUrl: str
         // textContent, never innerHTML: the address is attested, but it is still
         // a string arriving over the wire and this page will not be the place
         // that learns the difference the hard way.
-        who ? refused(who) : stop("You haven't been invited",
-          'That account is not on the invite list for this canvas. Ask whoever owns it to add your address.',
-          'Use a different account')
+        who ? refused(who) : stop(${JSON.stringify(tr("You haven't been invited"))},
+          ${JSON.stringify(tr('That account is not on the invite list for this canvas. Ask whoever owns it to add your address.'))},
+          ${JSON.stringify(tr('Use a different account'))})
         if (who && body && typeof body.request === 'string') offerRequest(body.request, typeof body.target === 'string' ? body.target : '')
       }, function () {
-        stop("You haven't been invited",
-          'That account is not on the invite list for this canvas.',
-          'Use a different account',
-          'Ask whoever owns it to add your address.')
+        stop(${JSON.stringify(tr("You haven't been invited"))},
+          ${JSON.stringify(tr('That account is not on the invite list for this canvas.'))},
+          ${JSON.stringify(tr('Use a different account'))},
+          ${JSON.stringify(tr('Ask whoever owns it to add your address.'))})
       })
     }
-    stop('That sign-in did not work', 'Start again from the canvas, or try a different account.', 'Try again')
+    stop(${JSON.stringify(tr('That sign-in did not work'))}, ${JSON.stringify(tr('Start again from the canvas, or try a different account.'))}, ${JSON.stringify(tr('Try again'))})
   }).catch(function () {
-    stop('Could not reach the canvas', 'It may have stopped. Try again in a moment.', 'Try again')
+    stop(${JSON.stringify(tr('Could not reach the canvas'))}, ${JSON.stringify(tr('It may have stopped. Try again in a moment.'))}, ${JSON.stringify(tr('Try again'))})
   })
 })()
 </script>

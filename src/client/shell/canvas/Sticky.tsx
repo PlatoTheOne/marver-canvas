@@ -20,6 +20,7 @@ import { useComments } from '../comments-store.ts'
 import { goTo } from '../goto.ts'
 import { NOTE_W, SCENE_NOTE_W, noteAnchor, noteVisible, useNotes, type NoteKind } from '../notes.ts'
 import { useStore } from '../store.ts'
+import { t } from '../../../shared/i18n.ts'
 
 export interface NoteSpec { kind: NoteKind; id: string; text: string }
 
@@ -218,7 +219,7 @@ async function renderDiagrams(body: HTMLElement, alive: () => boolean) {
     } catch (e) {
       if (!alive()) return
       pre.classList.add('err')
-      code.textContent = `diagram: ${String((e as Error)?.message ?? e).split('\n')[0]}`
+      code.textContent = t('diagram: {{message}}', { message: String((e as Error)?.message ?? e).split('\n')[0] })
     }
   }
 }
@@ -285,7 +286,7 @@ export const Stickies = memo(function Stickies({ nodeKey, frameId, notes, underB
   const width = Math.max(...notes.map((n) => (n.kind === 'scene' ? SCENE_NOTE_W : NOTE_W)))
   return (
     <div ref={col} className={`sh-notes${on ? '' : ' off'}${underBadge ? ' below-vbadge' : ''}`} data-node-notes={nodeKey} style={{ width }}>
-      <button className="sh-notes-fold sh-no-pan" type="button" aria-label={on ? 'hide notes' : 'show notes'} title={on ? 'hide notes (N: all)' : 'show notes (N: all)'}
+      <button className="sh-notes-fold sh-no-pan" type="button" aria-label={on ? t('hide notes') : t('show notes')} title={on ? t('hide notes (N: all)') : t('show notes (N: all)')}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); useNotes.getState().toggle(ids) }} />
       {notes.map((n) => (

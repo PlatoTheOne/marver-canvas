@@ -9,6 +9,7 @@ import { replay, type CommentEvent, type Thread } from '../../shared/events.ts'
 import { mentionPeople, mentionsIn } from './mentions.ts'
 import { playPing } from './sound.ts'
 import { ROUTE } from '../const.ts'
+import { t } from '../../shared/i18n.ts'
 
 export interface Me {
   email: string
@@ -283,7 +284,8 @@ export const useComments = create<CommentsState>((set, get) => {
       // (the canonical case: a signed-in viewer on a read-only board)
       if (!res.ok) {
         const { useStore } = await import('./store.ts')
-        useStore.getState().toast(String((res.data as any)?.error ?? 'comment rejected'))
+        // 服务端错误属于 Marver 内置提示；用户写下的评论正文不经过翻译。
+        useStore.getState().toast(t(String((res.data as any)?.error ?? 'comment rejected')))
       }
       // union only what the server took - a rejected send must not leave phantoms; the
       // store is global now, so an accepted write lands regardless of the viewed board
@@ -339,19 +341,19 @@ export const useComments = create<CommentsState>((set, get) => {
 
     async signIn(email, password) {
       const res = await api('auth/signin', { email, password })
-      if (!res.ok) return res.data?.error ?? 'sign-in failed'
+      if (!res.ok) return t(String(res.data?.error ?? 'sign-in failed'))
       set({ me: res.data.user, needsIdentity: false })
       return null
     },
     async claim(token, password, name, avatar) {
       const res = await api('auth/claim', { token, password, name, avatar })
-      if (!res.ok) return res.data?.error ?? 'claim failed'
+      if (!res.ok) return t(String(res.data?.error ?? 'claim failed'))
       set({ me: res.data.user, needsIdentity: false, inviteToken: null })
       return null
     },
     async saveProfile(patch) {
       const res = await api('profile', patch)
-      if (!res.ok) return res.data?.error ?? 'could not save - try again'
+      if (!res.ok) return t(String(res.data?.error ?? 'could not save - try again'))
       set({ me: res.data.user })
       return null
     },
