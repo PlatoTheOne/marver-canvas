@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { AGENT_BIN, AGENT_NAMES, detectAgent, onPath, type JamAgent } from './jam/agent.ts'
 import { readDescription } from '../shared/board-tree.ts'
+import { DEFAULT_LOCALE, resolveLocale, type Locale } from '../shared/i18n.ts'
 
 export interface Viewport { width: number; height: number }
 /** Live Jam: the dev-server daemon config, already RESOLVED - present means armed.
@@ -18,6 +19,8 @@ export interface ShConfig {
   /** One sentence on what this product is and for whom - the project's description in
    *  design/manifest.json, the first thing a new agent session reads. */
   description?: string
+  /** Marver 壳层与分享登录页使用的界面语言。 */
+  locale: Locale
   theme: string | null
   viewports: Record<string, Viewport>
   themes: string[]
@@ -45,6 +48,7 @@ export interface ShConfig {
 
 export const DEFAULTS: ShConfig = {
   mode: 'studio',
+  locale: DEFAULT_LOCALE,
   theme: null,
   viewports: {
     mobile: { width: 390, height: 844 },
@@ -70,6 +74,7 @@ export async function loadConfig(root: string): Promise<ShConfig> {
     const cfg: ShConfig = {
       ...DEFAULTS,
       ...user,
+      locale: resolveLocale(user.locale),
       viewports: validViewports(user.viewports) ?? DEFAULTS.viewports,
       themes: Array.isArray(user.themes) && user.themes.length ? user.themes.map(String) : DEFAULTS.themes,
       port: validPort(user.port) ?? DEFAULTS.port,

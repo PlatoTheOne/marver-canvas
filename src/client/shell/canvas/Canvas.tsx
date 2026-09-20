@@ -6,6 +6,7 @@ import { startPerf } from '../perf.ts'
 import { FrameNode, HEADER } from './FrameNode.tsx'
 import { NOTE_GAP } from '../notes.ts'
 import { startCameraBroadcast, setCameraScale } from './camera-broadcast.ts'
+import { t } from '../../../shared/i18n.ts'
 
 /**
  * The world. rzpp owns pan/zoom; nodes are absolutely positioned children of #sh-world.
@@ -116,10 +117,10 @@ function GroupCaptions() {
         return (
           <div key={id} className={`sh-gcaption sh-no-pan${allOn ? ' on' : ''}`}
             style={{ transform: `translate(${g.x}px, ${g.y}px) translateY(calc(-100% - clamp(4px, 8px * var(--sh-inv, 1), 40px)))` }}
-            title="Select all variants"
+            title={t('Select all variants')}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => { useStore.getState().selectMany(g.keys); canvasCtl.fitNodes(g.keys) }}>
-            {id.split('/').map((s) => s[0].toUpperCase() + s.slice(1)).join(' / ')} · {g.ids.size} variants
+            {id.split('/').map((s) => s[0].toUpperCase() + s.slice(1)).join(' / ')} · {t('{{count}} variants', { count: g.ids.size })}
           </div>
         )
       })}

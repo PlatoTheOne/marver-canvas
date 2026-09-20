@@ -5,6 +5,7 @@
  */
 import { boardFrames, fetchBoardNames, useStore } from './store.ts'
 import { canvasCtl } from './canvas/ctl.ts'
+import { t } from '../../shared/i18n.ts'
 
 /** Navigate to a frame id. `carry` keeps interact mode across the hop (a link inside an
  *  interacting frame walks a flow - it must not eject you to design mode). */
@@ -30,7 +31,7 @@ async function gotoAcrossBoards(target: string, carry: boolean) {
   const s = useStore.getState()
   // an id the manifest doesn't know resolves NOWHERE - a tombstone pin on some board
   // must not send us on a trip that ends in a silent timeout
-  if (!s.manifest?.frames.some((f) => f.id === target)) return s.toast(`unknown goto target "${target}"`)
+  if (!s.manifest?.frames.some((f) => f.id === target)) return s.toast(t('unknown goto target "{{target}}"', { target }))
   const seq = ++gotoSeq
   let home: string | null = null
   try {
@@ -41,14 +42,14 @@ async function gotoAcrossBoards(target: string, carry: boolean) {
   } catch {
     // a transport failure is NOT proof the frame is unpinned - spawning here would
     // recreate the board mutation this function exists to prevent
-    return useStore.getState().toast(`goto: could not read the boards - try again`)
+    return useStore.getState().toast(t('goto: could not read the boards - try again'))
   }
   if (seq !== gotoSeq) return                        // superseded by newer navigation
   if (!home) {
     // no curated board pins it - the original prototype behavior: spawn beside you
     const st = useStore.getState()
     const node = st.spawn(target)
-    if (!node) return st.toast(`unknown goto target "${target}"`)
+    if (!node) return st.toast(t('unknown goto target "{{target}}"', { target }))
     st.select(node.key)
     if (carry) st.setInteract(node.key)
     setTimeout(() => canvasCtl.fitNode(node.key), 50)

@@ -17,6 +17,7 @@ import { useComments } from './comments-store.ts'
 import { isNoteAnchor } from './notes.ts'
 import { ROUTE } from '../const.ts'
 import { poweredByUrl } from '../../shared/utm.ts'
+import { t } from '../../shared/i18n.ts'
 import { canvasCtl } from './canvas/ctl.ts'
 import { Tip } from './Tip.tsx'
 import { CommentButton, DevicePicker, HideUIButton, isHideUI, LaserButton, Popover, ThemePicker, toggleHideUI, usePopover } from './Toolbar.tsx'
@@ -61,11 +62,13 @@ export function enterSlides(over?: { at?: string; device?: string; theme?: strin
   if (!deck.length) {
     // 0.13.0 let a slides board play its ordinary frames as a prototype - keep
     // that as the fallback so an upgraded (or locked) board never dead-ends
-    s.toast('no slide: true frames on this board - playing it as a prototype')
+    s.toast(t('no slide: true frames on this board - playing it as a prototype'))
     enterPlay(over, { legacyDeck: true })   // enterPlay never calls back into enterSlides: no recursion
     return
   }
-  if (excluded.length) s.toast(`${excluded.length} non-slide frame${excluded.length === 1 ? '' : 's'} on this board won't play in slides mode`)
+  if (excluded.length) s.toast(excluded.length === 1
+    ? t("1 non-slide frame on this board won't play in slides mode")
+    : t("{{count}} non-slide frames on this board won't play in slides mode", { count: excluded.length }))
   frozenDeck = deck
   const at = over?.at && deck.includes(over.at) ? over.at : deck[0]
   const frame = s.manifest?.frames.find((f) => f.id === at)
@@ -87,7 +90,7 @@ export function enterPlay(over?: { at?: string; device?: string; theme?: string 
   // and the prototype IS what 0.13.0 showed for that board
   if (!opts?.legacyDeck && !modeAllowed(s.board, 'present')) return
   const list = playList()
-  if (!list.length) { s.toast('nothing to play on this board'); return }
+  if (!list.length) { s.toast(t('nothing to play on this board')); return }
   const overAt = over?.at && s.manifest?.frames.some((f) => f.id === over.at && f.kind === 'tsx') ? over.at : undefined
   const selNode = s.selection.map((k) => s.nodes.find((n) => n.key === k)).find((n): n is Node => !!n && list.includes(n.frame))
   // node is undefined only for an off-board overAt - frame meta then carries the defaults
@@ -121,7 +124,7 @@ export function enterFocus(at?: string, over?: { device?: string; theme?: string
   if (!over?.deep && !modeAllowed(s.board, 'focus')) return
   const list = playList()
   const target = at && s.manifest?.frames.some((f) => f.id === at && f.kind === 'tsx') ? at : list[0]
-  if (!target) { s.toast('nothing to focus here'); return }
+  if (!target) { s.toast(t('nothing to focus here')); return }
   const frame = s.manifest?.frames.find((f) => f.id === target)
   const node = s.nodes.find((n) => n.frame === target && !n.missing)
   const names = Object.keys(CONFIG.viewports)
@@ -174,7 +177,7 @@ function BoardMenu({ current }: { current: string }) {
   useEffect(() => { if (pop.open) fetchBoardNames().then(setNames).catch(() => {}) }, [pop.open])
   return (
     <div className="sh-theme" ref={pop.boxRef}>
-      <Tip side="bottom" label={<b>Switch board</b>}>
+      <Tip side="bottom" label={<b>{t('Switch board')}</b>}>
         <button className="sh-pill-btn bd" onClick={pop.toggle}>
           {boardLabel(current)}
           <CaretIcon size={11} style={{ transform: pop.open ? 'rotate(180deg)' : undefined }} />
@@ -271,15 +274,15 @@ function PlayComments({ iframe, frameId, vp, dw, dh, ready }: {
 
   return (
     <div className="sh-play-comments">
-      {threads.map((t) => {
-        const { x, y, orphan } = pinAt(t)
+      {threads.map((thread) => {
+        const { x, y, orphan } = pinAt(thread)
         return (
-          <div key={t.id} className={`cm-pin sh-no-pan${t.id === active ? ' on' : ''}${orphan ? ' orphan' : ''}`}
-            style={{ left: x, top: y, ...hueVars((t.anchor as any)?.el?.hue) }}
+          <div key={thread.id} className={`cm-pin sh-no-pan${thread.id === active ? ' on' : ''}${orphan ? ' orphan' : ''}`}
+            style={{ left: x, top: y, ...hueVars((thread.anchor as any)?.el?.hue) }}
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); setActive(t.id === active ? null : t.id) }}
-            title={orphan ? 'the anchored element is gone - comment parked' : undefined}>
-            <MarkerFace threads={[t]} />
+            onClick={(e) => { e.stopPropagation(); setActive(thread.id === active ? null : thread.id) }}
+            title={orphan ? t('the anchored element is gone - comment parked') : undefined}>
+            <MarkerFace threads={[thread]} />
           </div>
         )
       })}
@@ -462,7 +465,8 @@ function PlayInner() {
       } else if (data.type === 'sh:stage-exit') {
         exit()
       } else if (data.type === 'sh:stage-error') {
-        s.toast(`play: ${String(data.message ?? 'frame error')}`)
+        // 框架返回的诊断内容保持原样，只翻译 Marver 自己补充的提示外壳。
+        s.toast(t('play: {{message}}', { message: data.message == null ? t('frame error') : String(data.message) }))
       } else if (data.type === 'sh:stage-key') {
         if (data.meta && data.key === '/') toggleCollapse()
         else handleKey(String(data.key), String(data.code))
@@ -488,10 +492,10 @@ function PlayInner() {
         const f = at ? s.manifest?.frames.find((x) => x.id === at) : undefined
         // drop a stale post that outran a stage swap (the sender echoes its frame id)
         if (f && String(data.id ?? '') === at) {
-          const addr = `[${s.board} ▸ ${f.scene || '(root)'}]  ${f.file} · ${String(data.path ?? '')}${data.source ? ` (${String(data.source)})` : ''}`
+          const addr = `[${s.board} ▸ ${f.scene || t('(root)')}]  ${f.file} · ${String(data.path ?? '')}${data.source ? ` (${String(data.source)})` : ''}`
           navigator.clipboard.writeText(addr).then(
             () => postStage({ type: 'sh:copy-ok', seq: data.seq }),
-            () => s.toast('copy blocked - click the canvas first'))
+            () => s.toast(t('copy blocked - click the canvas first')))
         }
       }
     }
@@ -575,7 +579,9 @@ function PlayInner() {
   // fractional sizes left subpixel seams glowing at the corners on dark frames
   const dw = Math.round(vp.width * scale)
   const dh = Math.round(vp.height * scale)
-  const deviceHint = fill ? 'Fill window' : `${vp.width} × ${vp.height} · keys 1-${names.length + 1}`
+  const deviceHint = fill
+    ? t('Fill window')
+    : t('{{width}} × {{height}} · keys 1-{{count}}', { width: vp.width, height: vp.height, count: names.length + 1 })
 
   return (
     <div className={`sh-play${fill || docPreset ? ' fill' : ''}${docPreset ? ` doc t-${play.theme}` : ''}`}>
@@ -592,7 +598,7 @@ function PlayInner() {
           <iframe
             ref={iframeRef}
             src={src.current}
-            title="play"
+            title={t('play')}
             style={{ width: vp.width, height: vp.height, transform: `scale(${dw / vp.width}, ${dh / vp.height})` }}
           />
         </div>
@@ -602,7 +608,7 @@ function PlayInner() {
       {/* the slim progress strip: the MINIMAL trim's one affordance - full
           chrome already carries progress in the walker, so no duplicate */}
       {slides && deckChrome === 'minimal' && (
-        <div className="sh-slides-strip" aria-label={`slide ${pos + 1} of ${list.length}`}>
+        <div className="sh-slides-strip" aria-label={t('slide {{current}} of {{total}}', { current: pos + 1, total: list.length })}>
           <span className="n">{pos === -1 ? '·' : pos + 1} / {list.length}</span>
           <span className="bar"><i style={{ width: `${list.length > 1 ? Math.max(2, ((pos + 1) / list.length) * 100) : 100}%` }} /></span>
         </div>
@@ -655,14 +661,14 @@ function PlayInner() {
         </>}
         {playUpdateRevision && <>
           <i className="sep" />
-          <Tip side="bottom" label={<><b>Update ready</b><span>an edit landed - reload this prototype</span></>}>
-            <button className="sh-pill-btn sh-play-update" onClick={applyUpdate}><ReloadIcon size={13} /><span>Update</span></button>
+          <Tip side="bottom" label={<><b>{t('Update ready')}</b><span>{t('an edit landed - reload this prototype')}</span></>}>
+            <button className="sh-pill-btn sh-play-update" onClick={applyUpdate}><ReloadIcon size={13} /><span>{t('Update')}</span></button>
           </Tip>
         </>}
         {!trimmed && <>
         <i className="sep" />
         <HideUIButton />
-        <Tip side="bottom" label={<><b>Collapse toolbar</b><span>H hides everything · ⌘/</span></>}>
+        <Tip side="bottom" label={<><b>{t('Collapse toolbar')}</b><span>{t('H hides everything · ⌘/')}</span></>}>
           <button className="sh-pill-btn" onClick={() => setPillOpen(false)} tabIndex={pillOpen ? 0 : -1}>
             <PanelFilledIcon size={17} style={{ transform: 'rotate(90deg)' }} />
           </button>
@@ -671,13 +677,13 @@ function PlayInner() {
         {/* the canvas door: absent on a locked board (policy) and on a frame
             deep link (the link's chrome) - not hidden, not rendered */}
         {!noDoor && (
-          <Tip side="bottom" label={<><b>Open in canvas</b><span>Esc</span></>}>
+          <Tip side="bottom" label={<><b>{t('Open in canvas')}</b><span>Esc</span></>}>
             <button className="sh-pill-btn" onClick={exit}><GridIcon size={16} /></button>
           </Tip>
         )}
         {BRANDING && PUBLISHED && !trimmed && (
-          <Tip side="bottom" label={<b>Open in app</b>}>
-            <a className="sh-pill-btn" href="https://app.marver.design" target="_blank" rel="noopener" aria-label="Open in app">
+          <Tip side="bottom" label={<b>{t('Open in app')}</b>}>
+            <a className="sh-pill-btn" href="https://app.marver.design" target="_blank" rel="noopener" aria-label={t('Open in app')}>
               <BrowsersIcon size={16} />
             </a>
           </Tip>
@@ -685,22 +691,22 @@ function PlayInner() {
       </nav>
       )}
       {!(slides && deckChrome === 'none') && (
-      <Tip side="bottom" label={<><b>Open toolbar</b><span>⌘/</span></>}>
+      <Tip side="bottom" label={<><b>{t('Open toolbar')}</b><span>⌘/</span></>}>
         <button className={`sh-pill-fab${pillOpen ? ' hidden' : ''}`} onClick={() => setPillOpen(true)}
           aria-hidden={pillOpen} tabIndex={pillOpen ? -1 : 0}><PanelHollowIcon size={18} style={{ transform: 'rotate(90deg)' }} /></button>
       </Tip>
       )}
 
       {!focus && !trimmed && <div className="sh-play-nav">
-        <Tip inv label={<><b>Restart</b><span className="k">R</span></>}>
+        <Tip inv label={<><b>{t('Restart')}</b><span className="k">R</span></>}>
           <button onClick={restart}><ReloadIcon size={14} /></button>
         </Tip>
         <i className="sep" />
-        <Tip inv label={<><b>Previous frame</b><span className="k">←</span></>}>
+        <Tip inv label={<><b>{t('Previous frame')}</b><span className="k">←</span></>}>
           <button onClick={() => step(-1)}><ArrowLeftIcon size={14} /></button>
         </Tip>
         <span className="pos">{pos === -1 ? '·' : pos + 1}<em>/</em>{list.length}</span>
-        <Tip inv label={<><b>Next frame</b><span className="k">→</span></>}>
+        <Tip inv label={<><b>{t('Next frame')}</b><span className="k">→</span></>}>
           <button onClick={() => step(1)}><ArrowRightIcon size={14} /></button>
         </Tip>
         {variants.length > 1 && <>

@@ -8,6 +8,7 @@ import {
   applyDrop, boardsIn, createFolder, deleteFolder, folderIn, folderOf, foldersIn, humanize, isOwnSlot, labelOf, moveBoard, newFolderSlot, readTitle, resolveDrop, retitleFolder, rootIndex, slugFor,
   type Drag, type Drop, type Folder, type Row, type TreeItem,
 } from '../../shared/board-tree.ts'
+import { t } from '../../shared/i18n.ts'
 
 /**
  * Boards live at the top of the sidebar - always visible, one click to switch - in ONE level
@@ -31,7 +32,8 @@ type Intent = (tree: TreeItem[]) => TreeItem[] | null
 export function BoardList({ onMenu }: { onMenu: MenuOpener }) {
   const board = useStore((s) => s.board)
   const titles = useStore((s) => s.boardTitles)                       // board slug → title, off the last tree read
-  const label = (n: string) => labelOf(n, titles[n])                  // a board's label; a folder's is labelOf(name, item.title)
+  // “全部场景”是内建画板；其余画板标题均为用户内容，必须原样显示。
+  const label = (n: string) => n === 'all-scenes' ? t('All scenes') : labelOf(n, titles[n])
   const [tree, setTree] = useState<TreeItem[]>([])
   const [naming, setNaming] = useState<Naming | null>(null)
   const [closed, setClosed] = useState<Record<string, true>>(readClosed)
@@ -79,7 +81,7 @@ export function BoardList({ onMenu }: { onMenu: MenuOpener }) {
       // a server-side error (a malformed registry, a symlinked boards dir) is worth saying
       // out loud, once; transport failures keep the last known tree quietly
       const msg = e instanceof Error ? e.message : ''
-      if (/design\/boards/.test(msg) && msg !== lastErr.current) { lastErr.current = msg; useStore.getState().toast(msg) }
+      if (/design\/boards/.test(msg) && msg !== lastErr.current) { lastErr.current = msg; useStore.getState().toast(t(msg)) }
       return false
     }
   }
@@ -133,23 +135,23 @@ export function BoardList({ onMenu }: { onMenu: MenuOpener }) {
         const batch = [...queueRef.current]
         // an intent the fresh tree no longer admits (its board or folder vanished) is dropped
         // and said out loud, never silently counted as done
-        const reduce = (t: TreeItem[]) => {
+        const reduce = (treeItems: TreeItem[]) => {
           let dropped = 0
-          const tree = batch.reduce<TreeItem[]>((acc, i) => { const n = i(acc); if (!n) dropped++; return n ?? acc }, t)
-          if (dropped) useStore.getState().toast(dropped === batch.length ? 'that move no longer applies' : 'some moves no longer apply')
+          const tree = batch.reduce<TreeItem[]>((acc, i) => { const n = i(acc); if (!n) dropped++; return n ?? acc }, treeItems)
+          if (dropped) useStore.getState().toast(dropped === batch.length ? t('that move no longer applies') : t('some moves no longer apply'))
           return tree
         }
         const done = () => { queueRef.current.splice(0, batch.length); show() }   // written, or given up on - off the screen's projection either way
         try {
           let r = await useStore.getState().arrangeBoards(reduce(confirmedRef.current), baseRef.current)
           if (!r.ok && r.stale) {
-            if (!(await load())) { done(); useStore.getState().toast('boards changed - try again'); break }
+            if (!(await load())) { done(); useStore.getState().toast(t('boards changed - try again')); break }
             r = await useStore.getState().arrangeBoards(reduce(confirmedRef.current), baseRef.current)
           }
           done()
-          if (!r.ok) { useStore.getState().toast(r.error ?? 'could not save order'); await load(); break }
+          if (!r.ok) { useStore.getState().toast(t(r.error ?? 'could not save order')); await load(); break }
           await load()                                          // the write moved the hashes on; the next batch needs the true base
-        } catch { done(); useStore.getState().toast('could not save order'); await load(); break }
+        } catch { done(); useStore.getState().toast(t('could not save order')); await load(); break }
       }
     } finally {
       flushing.current = false
@@ -173,14 +175,18 @@ export function BoardList({ onMenu }: { onMenu: MenuOpener }) {
       const title = readTitle(raw)
       if (!title) { setNaming(null); return }
       // two rows reading alike would be a trap: a name another board (folder) already shows stays editing
-      const taken = (kind: 'board' | 'folder') => useStore.getState().toast(`a ${kind} called "${title}" already exists`)
+      const taken = (kind: 'board' | 'folder') => useStore.getState().toast(
+        kind === 'board'
+          ? t('a board called "{{title}}" already exists', { title })
+          : t('a folder called "{{title}}" already exists', { title }),
+      )
       const stored = (slug: string) => (title === humanize(slug) ? '' : title)
       if (n.kind === 'board') {
         if (title === label(n.name)) { setNaming(null); return }
         if (boardsIn(tree).some((b) => b !== n.name && label(b) === title) || (HAS_ALL_SCENES && label('all-scenes') === title)) { taken('board'); return }
         let r = await useStore.getState().renameBoard(n.name, stored(n.name), baseRef.current.boards[n.name])
         if (!r.ok && r.stale && await load()) r = await useStore.getState().renameBoard(n.name, stored(n.name), baseRef.current.boards[n.name])   // the file moved on (a drag just before, an agent): re-read, once more
-        if (!r.ok) { useStore.getState().toast(r.error ?? 'rename failed'); return }   // stay editing
+        if (!r.ok) { useStore.getState().toast(t(r.error ?? 'rename failed')); return }   // stay editing
         setNaming(null)
         refresh()
         return
@@ -191,7 +197,7 @@ export function BoardList({ onMenu }: { onMenu: MenuOpener }) {
         if (!current || title === labelOf(n.name, current.title)) { setNaming(null); return }
         if (folderLabels.includes(title)) { taken('folder'); return }
         setNaming(null)
-        mutate((t) => retitleFolder(t, n.name, stored(n.name)))
+        mutate((currentTree) => retitleFolder(currentTree, n.name, stored(n.name)))
         return
       }
       if (n.kind !== 'new') return
@@ -200,7 +206,7 @@ export function BoardList({ onMenu }: { onMenu: MenuOpener }) {
       const slug = slugFor(title, foldersIn(tree))                                // "Old stuff" → old-stuff (-2 past a namesake); "🚀" alone → folder
       setNaming(null)
       setOpen(slug, true)                                                       // a new folder opens, whatever an old namesake left behind
-      if (!mutate((t) => createFolder(t, slug, index, withBoard, stored(slug) || undefined))) useStore.getState().toast('that board is gone - nothing changed')
+      if (!mutate((currentTree) => createFolder(currentTree, slug, index, withBoard, stored(slug) || undefined))) useStore.getState().toast(t('that board is gone - nothing changed'))
     } finally { commitBusy.current = false }
   }
 
@@ -273,7 +279,7 @@ export function BoardList({ onMenu }: { onMenu: MenuOpener }) {
     if (dragged) {
       if (!target) return
       if ('into' in target) setOpen(target.into, true)          // show where it landed
-      mutate((t) => applyDrop(t, item, target))
+      mutate((currentTree) => applyDrop(currentTree, item, target))
     }
     else if (item.kind === 'board') void pick(item.name)          // a tap switches boards (the trailing mouse click is ignored)
     else setOpen(item.name, !!closed[item.name])                   // a tap on a folder toggles it
@@ -291,21 +297,21 @@ export function BoardList({ onMenu }: { onMenu: MenuOpener }) {
   // ---- menus (flat lists, no submenus) ----
   const newFolderAt = (index: number, withBoard?: string) => setNaming({ kind: 'new', index, board: withBoard })
   const boardMenu = (n: string, parent: string | null): MenuItem[] => {
-    const items: MenuItem[] = [{ label: 'Copy path', icon: <SignpostIcon size={15} />, onClick: () => copyToClipboard(`board: ${n}`, 'path copied') }]
+    const items: MenuItem[] = [{ label: t('Copy path'), icon: <SignpostIcon size={15} />, onClick: () => copyToClipboard(t('board: {{board}}', { board: n }), t('path copied')) }]
     if (PUBLISHED || n === 'all-scenes') return items
-    items.push({ label: 'Rename', icon: <PencilSimpleIcon size={15} />, onClick: () => setNaming({ kind: 'board', name: n }) })
+    items.push({ label: t('Rename'), icon: <PencilSimpleIcon size={15} />, onClick: () => setNaming({ kind: 'board', name: n }) })
     // the new folder takes the board's own slot (or the slot after its current folder)
-    items.push({ label: 'Move to new folder', icon: <FolderPlusIcon size={15} />, onClick: () => newFolderAt(newFolderSlot(treeRef.current, n), n) })
+    items.push({ label: t('Move to new folder'), icon: <FolderPlusIcon size={15} />, onClick: () => newFolderAt(newFolderSlot(treeRef.current, n), n) })
     // moving into an EXISTING folder is a drag, not a menu - the list stays short
-    if (parent) items.push({ label: 'Move to top level', icon: <ArrowLineUpIcon size={15} />, onClick: () => mutate((t) => { const p = folderOf(t, n); return moveBoard(t, n, null, p ? rootIndex(t, 'folder', p) + 1 : undefined) }) })
+    if (parent) items.push({ label: t('Move to top level'), icon: <ArrowLineUpIcon size={15} />, onClick: () => mutate((currentTree) => { const p = folderOf(currentTree, n); return moveBoard(currentTree, n, null, p ? rootIndex(currentTree, 'folder', p) + 1 : undefined) }) })
     return items
   }
   const folderMenu = (f: string, boards: string[]): MenuItem[] => {
-    const items: MenuItem[] = [{ label: 'Copy path', icon: <SignpostIcon size={15} />, onClick: () => copyToClipboard(`folder: ${f}  (boards: ${boards.join(', ') || 'none'})`, 'path copied') }]
+    const items: MenuItem[] = [{ label: t('Copy path'), icon: <SignpostIcon size={15} />, onClick: () => copyToClipboard(t('folder: {{folder}}  (boards: {{boards}})', { folder: f, boards: boards.join(', ') || t('none') }), t('path copied')) }]
     if (PUBLISHED) return items
-    items.push({ label: 'Rename', icon: <PencilSimpleIcon size={15} />, onClick: () => setNaming({ kind: 'folder', name: f }) })
+    items.push({ label: t('Rename'), icon: <PencilSimpleIcon size={15} />, onClick: () => setNaming({ kind: 'folder', name: f }) })
     // folders organise, never own: deleting one puts its boards back at the top level, in order
-    items.push({ label: 'Delete folder', icon: <FolderMinusIcon size={15} />, onClick: () => { setOpen(f, true); mutate((t) => deleteFolder(t, f)) } })
+    items.push({ label: t('Delete folder'), icon: <FolderMinusIcon size={15} />, onClick: () => { setOpen(f, true); mutate((currentTree) => deleteFolder(currentTree, f)) } })
     return items
   }
   /** Right-click on the sidebar itself (the Boards header, gaps between rows, the blank space
@@ -313,7 +319,7 @@ export function BoardList({ onMenu }: { onMenu: MenuOpener }) {
   const blankMenu = (e: { preventDefault(): void; clientX: number; clientY: number; target: EventTarget | null }) => {
     if (PUBLISHED) return
     if ((e.target as HTMLElement).closest('[data-board-row],[data-folder-row],.editing,.sh-hd-add')) return
-    onMenuRef.current(e, [{ label: 'New folder', icon: <FolderPlusIcon size={15} />, onClick: () => newFolderAt(treeRef.current.length) }])
+    onMenuRef.current(e, [{ label: t('New folder'), icon: <FolderPlusIcon size={15} />, onClick: () => newFolderAt(treeRef.current.length) }])
   }
   const onMenuRef = useRef(onMenu)
   onMenuRef.current = onMenu
@@ -409,7 +415,7 @@ export function BoardList({ onMenu }: { onMenu: MenuOpener }) {
   const draft = naming?.kind === 'new' ? (naming.board && !boardsIn(tree).includes(naming.board) ? { ...naming, board: undefined } : naming) : null   // a board deleted mid-naming leaves the draft
   const rows: ReactNode[] = []
   const draftRows = draft ? [
-    <div key="f:new" className="it folder editing"><FolderOpenIcon size={14} />{input('', 'Folder name')}</div>,
+    <div key="f:new" className="it folder editing"><FolderOpenIcon size={14} />{input('', t('Folder name'))}</div>,
     ...(draft.board ? [<div key="new/board" className={`it board in-folder draft${draft.board === board ? ' cur' : ''}`}><CardsIcon size={14} /><span>{label(draft.board)}</span></div>] : []),
   ] : []
   tree.forEach((it, i) => {
@@ -422,11 +428,11 @@ export function BoardList({ onMenu }: { onMenu: MenuOpener }) {
   return (
     <div className="sh-boards" ref={rootRef} onContextMenu={(e: ReactMouseEvent) => blankMenu(e)}>
       <div className="hd">
-        <span>Boards</span>
+        <span>{t('Boards')}</span>
         {/* the quiet way in: a folder-plus on the header (the right-click menu is the other) */}
         {!PUBLISHED && (
-          <Tip side="bottom" label="New folder">
-            <FolderPlusIcon size={17} className="sh-hd-add" role="button" tabIndex={0} aria-label="New folder"
+          <Tip side="bottom" label={t('New folder')}>
+            <FolderPlusIcon size={17} className="sh-hd-add" role="button" tabIndex={0} aria-label={t('New folder')}
               onClick={() => newFolderAt(treeRef.current.length)}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); newFolderAt(treeRef.current.length) } }} />
           </Tip>

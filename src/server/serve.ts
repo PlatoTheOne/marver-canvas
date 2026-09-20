@@ -11,6 +11,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { NAME } from '../cli/name.ts'
 import { poweredByUrl } from '../shared/utm.ts'
+import { DEFAULT_LOCALE, htmlLang, translator, type Locale } from '../shared/i18n.ts'
 import { secureSuffix } from './secure-cookie.ts'
 
 export const MIME: Record<string, string> = {
@@ -30,7 +31,7 @@ export async function serve(root: string, portFlag?: number) {
     process.exit(1)
   }
   const realDist = realpathSync(dist)
-  let meta: { name: string; branding: boolean; logo?: string; rights?: Record<string, 'read' | 'comment'> } = { name: 'Marver', branding: true }
+  let meta: { name: string; branding: boolean; logo?: string; rights?: Record<string, 'read' | 'comment'>; locale?: Locale } = { name: 'Marver', branding: true, locale: DEFAULT_LOCALE }
   try { meta = { ...meta, ...JSON.parse(readFileSync(join(dist, 'meta.json'), 'utf8')) } } catch { /* defaults */ }
 
   // ---- collaboration: on when MARVER_DATA_DIR names a durable home ----
@@ -192,7 +193,7 @@ export async function serve(root: string, portFlag?: number) {
     // way the gate shows it, so the two read as the same canvas.
     const canvasName = humanName(meta.name)
     const { ceilingsFromRights } = await import('./share.ts')
-    idHandler = marverIdHandler(dataDir(), idIssuer, canvasName, meta.branding, ceilingsFromRights(meta.rights ?? {}))
+    idHandler = marverIdHandler(dataDir(), idIssuer, canvasName, meta.branding, ceilingsFromRights(meta.rights ?? {}), meta.locale)
   }
 
   // Both set: the issuer wins and the password is ignored - said once, out
@@ -524,8 +525,11 @@ function denyFraming(res: any) {
   res.setHeader('x-frame-options', 'DENY')
 }
 
-function gate(res: any, meta: { name: string; branding: boolean; logo?: string }, collabOn: boolean, error?: string, idOn = false) {
+function gate(res: any, meta: { name: string; branding: boolean; logo?: string; locale?: Locale }, collabOn: boolean, error?: string, idOn = false) {
   const name = humanName(meta.name) ?? 'Marver'
+  const locale = htmlLang(meta.locale)
+  const tr = translator(locale)
+  const shownError = error ? tr(error) : ''
   // the app's own logo when the build found one; Marver's mark as the backup
   const appMark = meta.logo ? `<img src="${esc(meta.logo)}" alt="" width="24" height="24" />` : MARK_LG
   // The self-promotion balance: the tab truncates to the app's name, so the title's
@@ -533,16 +537,16 @@ function gate(res: any, meta: { name: string; branding: boolean; logo?: string }
   // The description explains what the link IS (app first, Marver second); noindex
   // because a private canvas spreads by people sharing it, not by crawlers.
   // Once through the gate, the shell's own titles take over (`<board> - Marver`).
-  const title = meta.branding ? `${name} | Marver - Visualize your software` : name
+  const title = meta.branding ? `${name} | ${tr('Marver - Visualize your software')}` : name
   const desc = meta.branding
-    ? `${name}, shared as a live Marver canvas - real screens and prototypes, built from the codebase. Marver is the agent-native design canvas.`
-    : `${name} - a private design canvas.`
+    ? tr('{{name}}, shared as a live Marver canvas - real screens and prototypes, built from the codebase. Marver is the agent-native design canvas.', { name })
+    : tr('{{name}} - a private design canvas.', { name })
   res.statusCode = 200
   res.setHeader('content-type', 'text/html; charset=utf-8')
   res.setHeader('cache-control', 'no-store')
   denyFraming(res)
   res.end(`<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(desc)}" />
 <meta name="robots" content="noindex" />
@@ -635,61 +639,61 @@ ${meta.branding ? '<meta property="og:site_name" content="Marver" />' : ''}
 ${idOn ? `
       <div style="display:flex;flex-direction:column;gap:14px" id="id-card">
         <header>${appMark}<h1>${esc(name)}</h1></header>
-        <p class="lead">This canvas is private. Taking you to Marver to sign in...</p>
-        <div class="err" id="id-err">${error ? esc(error) : ''}</div>
+        <p class="lead">${esc(tr('This canvas is private. Taking you to Marver to sign in...'))}</p>
+        <div class="err" id="id-err">${esc(shownError)}</div>
         <div class="ctawrap">
           <form method="get" action="/__mv/id/start" style="width:100%">
             <input type="hidden" name="next" id="id-next" />
-            <button class="cta" id="id-go" type="submit">Continue</button>
+            <button class="cta" id="id-go" type="submit">${esc(tr('Continue'))}</button>
           </form>
         </div>
       </div>` : `
       <form method="post" action="/__mv/auth" style="display:flex;flex-direction:column;gap:14px">
         <header>${appMark}<h1>${esc(name)}</h1></header>
-        <p class="lead">You're one step from the canvas. This space is private - enter the canvas password to step inside.</p>
-        <div class="err">${error ? esc(error) : ''}</div>
-        <input type="password" name="password" placeholder="Canvas password" autofocus autocomplete="current-password" />
+        <p class="lead">${esc(tr("You're one step from the canvas. This space is private - enter the canvas password to step inside."))}</p>
+        <div class="err">${esc(shownError)}</div>
+        <input type="password" name="password" placeholder="${esc(tr('Canvas password'))}" autofocus autocomplete="current-password" />
         <input type="hidden" name="next" />
         <div class="ctawrap">
-          <button class="cta" type="submit" disabled>Open the canvas</button>
-          <span class="tip">Enter the canvas password first</span>
+          <button class="cta" type="submit" disabled>${esc(tr('Open the canvas'))}</button>
+          <span class="tip">${esc(tr('Enter the canvas password first'))}</span>
         </div>
-        ${collabOn ? '<div class="swap"><span style="font:500 12px -apple-system,system-ui,sans-serif;color:rgba(24,24,27,.45)">Member? <a data-go="member">Sign in instead</a></span></div>' : ''}
+        ${collabOn ? `<div class="swap"><span style="font:500 12px -apple-system,system-ui,sans-serif;color:rgba(24,24,27,.45)">${esc(tr('Member?'))} <a data-go="member">${esc(tr('Sign in instead'))}</a></span></div>` : ''}
       </form>`}
     </section>
 ${collabOn ? `
     <section id="member">
       <header>${appMark}<h1>${esc(name)}</h1></header>
-      <p class="lead">Welcome back - sign in with your own password. Your account already covers reading.</p>
+      <p class="lead">${esc(tr('Welcome back - sign in with your own password. Your account already covers reading.'))}</p>
       <div class="err" id="member-err"></div>
       <div class="stack">
-        <input type="email" id="m-email" placeholder="Email" autocomplete="email" />
-        <input type="password" id="m-pass" placeholder="Password" autocomplete="current-password" />
+        <input type="email" id="m-email" placeholder="${esc(tr('Email'))}" autocomplete="email" />
+        <input type="password" id="m-pass" placeholder="${esc(tr('Password'))}" autocomplete="current-password" />
       </div>
       <div class="ctawrap">
-        <button class="cta" id="m-go" disabled>Sign in</button>
-        <span class="tip">Fill in email and password</span>
+        <button class="cta" id="m-go" disabled>${esc(tr('Sign in'))}</button>
+        <span class="tip">${esc(tr('Fill in email and password'))}</span>
       </div>
-      <div class="swap"><span style="font:500 12px -apple-system,system-ui,sans-serif;color:rgba(24,24,27,.45)">Just viewing? <a data-go="guest">Enter with the canvas password</a></span></div>
+      <div class="swap"><span style="font:500 12px -apple-system,system-ui,sans-serif;color:rgba(24,24,27,.45)">${esc(tr('Just viewing?'))} <a data-go="guest">${esc(tr('Enter with the canvas password'))}</a></span></div>
     </section>
 
     <section id="claim">
       <header>${appMark}<h1>${esc(name)}</h1></header>
-      <p class="lead">You're invited to comment on this canvas.<br />Pick how you'll appear - comments carry your name.</p>
+      <p class="lead">${esc(tr("You're invited to comment on this canvas."))}<br />${esc(tr("Pick how you'll appear - comments carry your name."))}</p>
       <div class="err" id="claim-err"></div>
       <div class="stack">
-        <div class="chip" id="c-chip" hidden><b id="c-email"></b><span>INVITED</span></div>
-        <input type="password" id="c-pass" placeholder="Choose a password" autocomplete="new-password" />
+        <div class="chip" id="c-chip" hidden><b id="c-email"></b><span>${esc(tr('INVITED'))}</span></div>
+        <input type="password" id="c-pass" placeholder="${esc(tr('Choose a password'))}" autocomplete="new-password" />
       </div>
       <hr class="cdiv" />
       <div class="idrow">
-        <button class="pfp" id="c-pfp" type="button" aria-label="Select your profile picture" data-tip="Select your profile picture">+</button>
+        <button class="pfp" id="c-pfp" type="button" aria-label="${esc(tr('Select your profile picture'))}" data-tip="${esc(tr('Select your profile picture'))}">+</button>
         <input type="file" id="c-file" accept="image/*" hidden />
-        <input type="text" id="c-name" placeholder="Set a display name" autocomplete="nickname" style="flex:1" />
+        <input type="text" id="c-name" placeholder="${esc(tr('Set a display name'))}" autocomplete="nickname" style="flex:1" />
       </div>
       <div class="ctawrap">
-        <button class="cta" id="c-go" disabled>Join the canvas</button>
-        <span class="tip">Password and display name still needed</span>
+        <button class="cta" id="c-go" disabled>${esc(tr('Join the canvas'))}</button>
+        <span class="tip">${esc(tr('Password and display name still needed'))}</span>
       </div>
     </section>
 ` : ''}
@@ -730,6 +734,17 @@ ${collabOn ? `
       const go = e.target.closest('[data-go]')
       if (go) { e.preventDefault(); show(go.dataset.go) }
     })
+    const localizedErrors = ${JSON.stringify({
+      'sign-in failed': tr('sign-in failed'),
+      'claim failed': tr('claim failed'),
+      'this invite link is invalid': tr('this invite link is invalid'),
+      'wrong email or password': tr('wrong email or password'),
+      'too many attempts - wait a minute': tr('too many attempts - wait a minute'),
+      'password must be at least 8 characters': tr('password must be at least 8 characters'),
+      'a display name is required': tr('a display name is required'),
+      'this invite link is invalid, expired, or already used': tr('this invite link is invalid, expired, or already used'),
+    })}
+    const localError = (message) => localizedErrors[message] || message
     const api = (path, body) => fetch('/__mv/api/' + path, {
       method: body === undefined ? 'GET' : 'POST',
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
@@ -745,7 +760,7 @@ ${collabOn ? `
       $('m-go').disabled = true
       const r = await api('auth/signin', { email: $('m-email').value.trim(), password: $('m-pass').value })
       if (r.ok) return location.reload()
-      $('member-err').textContent = r.data.error || 'sign-in failed'
+      $('member-err').textContent = localError(r.data.error || 'sign-in failed')
       $('m-go').disabled = false
     }
     $('m-go').addEventListener('click', signin)
@@ -760,7 +775,7 @@ ${collabOn ? `
       show('claim')
       api('invite-info?token=' + encodeURIComponent(inv[1])).then((r) => {
         if (r.ok) { $('c-email').textContent = r.data.email; $('c-chip').hidden = false }
-        else $('claim-err').textContent = r.data.error || 'this invite link is invalid'
+        else $('claim-err').textContent = localError(r.data.error || 'this invite link is invalid')
       })
     }
     // avatar: pick, downscale to 128px client-side, preview in the circle
@@ -775,7 +790,7 @@ ${collabOn ? `
         c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 128, 128)
         avatar = c.toDataURL('image/jpeg', .85)
         const p = $('c-pfp')
-        p.classList.add('set'); p.style.backgroundImage = 'url(' + avatar + ')'; p.textContent = ''; p.dataset.tip = 'Change your photo'
+        p.classList.add('set'); p.style.backgroundImage = 'url(' + avatar + ')'; p.textContent = ''; p.dataset.tip = ${JSON.stringify(tr('Change your photo'))}
         URL.revokeObjectURL(img.src)
       }
       img.src = URL.createObjectURL(file)
@@ -785,7 +800,7 @@ ${collabOn ? `
       $('c-go').disabled = true
       const r = await api('auth/claim', { token: inv ? inv[1] : '', password: $('c-pass').value, name: $('c-name').value.trim(), avatar: avatar || undefined })
       if (r.ok) return location.href = location.pathname   // consumed invite leaves the URL
-      $('claim-err').textContent = r.data.error || 'claim failed'
+      $('claim-err').textContent = localError(r.data.error || 'claim failed')
       $('c-go').disabled = false
     }
     $('c-go').addEventListener('click', claim)
@@ -793,7 +808,7 @@ ${collabOn ? `
     ` : ''}
   })()
   </script>
-  ${meta.branding ? `<footer><a href="${poweredByUrl(meta.name, 'published-canvas', 'gate')}" target="_blank" rel="noopener">${MARK} <span>Powered by <span class="md">Marver.design</span></span> <svg class="up" viewBox="0 0 256 256" width="11" height="11" fill="currentColor" aria-hidden><path d="M200,64V168a8,8,0,0,1-16,0V83.31L69.66,197.66a8,8,0,0,1-11.32-11.32L172.69,72H88a8,8,0,0,1,0-16H192A8,8,0,0,1,200,64Z"/></svg></a></footer>` : ''}
+  ${meta.branding ? `<footer><a href="${poweredByUrl(meta.name, 'published-canvas', 'gate')}" target="_blank" rel="noopener">${MARK} <span>${esc(tr('Powered by'))} <span class="md">Marver.design</span></span> <svg class="up" viewBox="0 0 256 256" width="11" height="11" fill="currentColor" aria-hidden><path d="M200,64V168a8,8,0,0,1-16,0V83.31L69.66,197.66a8,8,0,0,1-11.32-11.32L172.69,72H88a8,8,0,0,1,0-16H192A8,8,0,0,1,200,64Z"/></svg></a></footer>` : ''}
 </main></body></html>`)
 }
 

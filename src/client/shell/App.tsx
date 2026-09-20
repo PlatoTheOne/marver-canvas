@@ -16,8 +16,12 @@ import { avatarFallback, useComments } from './comments-store.ts'
 import { goTo } from './goto.ts'
 import { useNotes } from './notes.ts'
 import { CommentButton, DevicePicker, HideUIButton, LaserButton, Popover, ThemePicker, toggleHideUI, usePopover } from './Toolbar.tsx'
+import { t } from '../../shared/i18n.ts'
 
 const commentsStore = () => useComments.getState()
+
+/** 只翻译 Marver 内建主题名，项目配置的自定义主题名保持原样。 */
+const themeLabel = (name: string) => name === 'light' ? t('Light') : name === 'dark' ? t('Dark') : name === 'default' ? t('Default') : name
 
 let booted = false                             // survives Fast Refresh; see the boot effect
 
@@ -43,7 +47,7 @@ function SceneGroup({ name, label, count, held, renaming, onRename, onPick, onCo
         <button className={`it${held ? ' held' : ''}`} onClick={() => setOpen(!open)} onContextMenu={onContextMenu}>
           <CaretIcon size={11} className="tw" style={{ transform: open ? undefined : 'rotate(-90deg)' }} />
           {/* the NAME selects every frame in the scene; the caret/row still collapses */}
-          <span onClick={(e) => { if (!onPick) return; e.stopPropagation(); onPick() }}>{label || '(root)'}</span>
+          <span onClick={(e) => { if (!onPick) return; e.stopPropagation(); onPick() }}>{label || t('(root)')}</span>
           <small>{count}</small>
         </button>
       )}
@@ -60,9 +64,9 @@ export class ShellBoundary extends Component<{ children: ReactNode }, { err: Err
     if (!this.state.err) return this.props.children
     return (
       <div style={{ fontFamily: 'ui-monospace, monospace', padding: 32 }}>
-        <b style={{ color: '#a81f16' }}>shell crashed</b>
+        <b style={{ color: '#a81f16' }}>{t('shell crashed')}</b>
         <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{this.state.err.message}</pre>
-        <button onClick={() => location.reload()}>reload</button>
+        <button onClick={() => location.reload()}>{t('reload')}</button>
       </div>
     )
   }
@@ -156,7 +160,7 @@ function SelectionBar() {
       }}
     >
       {multi && <>
-        <Tip label={`${selection.length} frames selected`}><span className="cnt">{selection.length}</span></Tip>
+        <Tip label={t('{{count}} frames selected', { count: selection.length })}><span className="cnt">{selection.length}</span></Tip>
         <i className="sep" />
       </>}
       {Object.entries(CONFIG.viewports).map(([name, vp], vi) => {
@@ -170,29 +174,29 @@ function SelectionBar() {
         )
       })}
       <i className="sep" />
-      {CONFIG.themes.map((t) => (
-        <Tip key={t} label={`${cap(t)} theme`}>
-          <button className={`icon${node.theme === t ? ' on' : ''}`} onClick={() => setNodeTheme(t)}>
-            {t === 'dark' ? <MoonIcon size={15} /> : t === 'light' ? <SunIcon size={15} /> : t}
+      {CONFIG.themes.map((theme) => (
+        <Tip key={theme} label={t('{{theme}} theme', { theme: themeLabel(theme) })}>
+          <button className={`icon${node.theme === theme ? ' on' : ''}`} onClick={() => setNodeTheme(theme)}>
+            {theme === 'dark' ? <MoonIcon size={15} /> : theme === 'light' ? <SunIcon size={15} /> : themeLabel(theme)}
           </button>
         </Tip>
       ))}
       <i className="sep" />
-      <Tip label={<><b>{multi ? `Copy ${selection.length} paths` : 'Copy path'}</b><span className="k">⇧P</span></>}>
+      <Tip label={<><b>{multi ? t('Copy {{count}} paths', { count: selection.length }) : t('Copy path')}</b><span className="k">⇧P</span></>}>
         <button className="icon"
           onClick={() => {
             const brd = useStore.getState().board
             const text = selectedFrames().map((f) => framePath(brd, f)).join('\n')
             navigator.clipboard.writeText(text).then(
-              () => { toast(multi ? `${selection.length} paths copied` : 'path copied'); useStore.getState().pulsePath() },
-              () => toast('copy blocked - click the canvas first'))
+              () => { toast(multi ? t('{{count}} paths copied', { count: selection.length }) : t('path copied')); useStore.getState().pulsePath() },
+              () => toast(t('copy blocked - click the canvas first')))
           }}>{copied ? <CheckIcon size={15} /> : <SignpostIcon size={15} />}</button>
       </Tip>
       {/* copy as image: dev only (the renderer is the dev server's headless Chrome) and one
           frame at a time (a clipboard holds one image). I = 2x, Shift+I = 4x. */}
       {!PUBLISHED && (
-        <Tip label={multi ? 'Select one frame to copy as image' : <><b>Copy as image</b><span className="k">⇧i</span></>}>
-          <button className={`icon${imageBusy ? ' busy' : ''}`} disabled={multi || imageBusy} aria-label="Copy as image"
+        <Tip label={multi ? t('Select one frame to copy as image') : <><b>{t('Copy as image')}</b><span className="k">⇧i</span></>}>
+          <button className={`icon${imageBusy ? ' busy' : ''}`} disabled={multi || imageBusy} aria-label={t('Copy as image')}
             data-state={copiedImage ? 'copied' : imageBusy ? 'busy' : 'idle'}
             onClick={(e) => useStore.getState().copyFrameImage(e.shiftKey ? 4 : 2)}>
             {copiedImage ? <CheckIcon size={15} /> : <ImagesSquareIcon size={15} />}
@@ -228,7 +232,7 @@ function DeviceMenu() {
   const active = scoped
     ? entries.find(([, vp]) => selNodes.length > 0 && selNodes.every((n) => n.w === vp.width))?.[0] ?? null
     : deviceView
-  const hint = scoped ? `${selection.length} selected` : deviceView ? cap(deviceView) : `keys 1-${entries.length}`
+  const hint = scoped ? t('{{count}} selected', { count: selection.length }) : deviceView ? cap(deviceView) : t('keys 1-{{count}}', { count: entries.length })
   return <DevicePicker value={active} onSelect={pick} includeDefault hint={hint} />
 }
 
@@ -256,15 +260,15 @@ function UpdatePill() {
   }
   return (
     <div className="sh-update">
-      <span><b>{latest}</b> is out</span>
-      <Tip side="top" label="Copy, then paste to your terminal or your agent">
+      <span>{t('{{version}} is out', { version: latest })}</span>
+      <Tip side="top" label={t('Copy, then paste to your terminal or your agent')}>
         <button className="cmd" onClick={() => {
-          const t = useStore.getState().toast
-          navigator.clipboard?.writeText(cmd).then(() => t('update command copied'), () => t('copy blocked - select it manually'))
-            ?? t('copy unavailable - select it manually')
+          const showToast = useStore.getState().toast
+          navigator.clipboard?.writeText(cmd).then(() => showToast(t('update command copied')), () => showToast(t('copy blocked - select it manually')))
+            ?? showToast(t('copy unavailable - select it manually'))
         }}><code>{cmd}</code></button>
       </Tip>
-      <Tip side="top" label="Dismiss this version">
+      <Tip side="top" label={t('Dismiss this version')}>
         <button className="x" onClick={dismiss}><XIcon size={13} /></button>
       </Tip>
     </div>
@@ -280,7 +284,7 @@ function ZoomMenu() {
   const go = (fn: () => void) => { fn(); pop.setOpen(false) }
   return (
     <div className="sh-theme" ref={pop.boxRef}>
-      <Tip side="bottom" label="Zoom presets">
+      <Tip side="bottom" label={t('Zoom presets')}>
         <button className="sh-pill-btn pct" onClick={pop.toggle}>{Math.round(scale * 100)}%</button>
       </Tip>
       <Popover pop={pop}>
@@ -292,9 +296,9 @@ function ZoomMenu() {
           </button>
         ))}
         <i className="div" />
-        <button onClick={() => go(canvasCtl.fitAll)}><span>Fit all</span><kbd>⇧1</kbd></button>
+        <button onClick={() => go(canvasCtl.fitAll)}><span>{t('Fit all')}</span><kbd>⇧1</kbd></button>
         <button onClick={() => go(() => { const k = useStore.getState().selection; if (k.length) canvasCtl.fitNodes(k) })}>
-          <span>Fit selection</span><kbd>⇧2</kbd>
+          <span>{t('Fit selection')}</span><kbd>⇧2</kbd>
         </button>
       </Popover>
     </div>
@@ -321,7 +325,7 @@ function ThemeMenu() {
     const st = useStore.getState()
     scoped ? st.setSelectedTheme(t) : st.setTheme(t)
   }
-  const hint = scoped ? `${selection.length} selected · D` : 'all frames · D'
+  const hint = scoped ? t('{{count}} selected · D', { count: selection.length }) : t('all frames · D')
   return <ThemePicker value={majority} checked={uniform} onSelect={pick} hint={hint} />
 }
 
@@ -557,7 +561,7 @@ export function App() {
         if (s.nodes.find((n) => n.key === nodeKey)?.status === 'ready') s.bumpRev(nodeKey)
         s.setStatus(nodeKey, 'ready')
       } else if (data.type === 'sh:error') {
-        s.setStatus(nodeKey, 'error', String(data.message ?? 'unknown error'))
+        s.setStatus(nodeKey, 'error', String(data.message ?? t('unknown error')))
       } else if (data.type === 'sh:exit-interact') {
         if (s.interact === nodeKey) setInteract(null)
       } else if (data.type === 'sh:theme-applied') {
@@ -586,7 +590,7 @@ export function App() {
           // only failure needs the toast
           navigator.clipboard.writeText(addr).then(
             () => el.contentWindow?.postMessage({ type: 'sh:copy-ok', seq: data.seq }, location.origin),
-            () => toast('copy blocked - click the canvas first'))
+            () => toast(t('copy blocked - click the canvas first')))
         }
       } else if (data.type === 'sh:frame-down') {
         // clicks INSIDE a frame never reach the shell document - the frame reports
@@ -672,18 +676,18 @@ export function App() {
         const c = commentsStore()
         if (!c.commentMode) s.setLaser(false)
         c.setMode(!c.commentMode)
-        toast(c.commentMode ? 'comment mode off' : 'comment mode - click an element in a frame')
+        toast(c.commentMode ? t('comment mode off') : t('comment mode - click an element in a frame'))
       }
       if (e.key === 'C' && e.shiftKey) { const c = commentsStore(); c.setShow(!c.show) }
       // sticky notes (spec 18): any note visible -> hide all; none -> show all
-      if (e.key === 'n' && !e.shiftKey) { const visible = document.querySelectorAll('.sh-notes:not(.off)').length > 0; useNotes.getState().toggleAll(visible); toast(visible ? 'notes hidden' : 'notes shown'); return }
+      if (e.key === 'n' && !e.shiftKey) { const visible = document.querySelectorAll('.sh-notes:not(.off)').length > 0; useNotes.getState().toggleAll(visible); toast(visible ? t('notes hidden') : t('notes shown')); return }
       // Shift+L = laser comment: the laser-sharp lighting on the element a comment tags
       // (pick hover, compose lock, open-thread highlight). Pins and cards stay - this
       // only dims the lighting inside the artwork.
       if (e.key === 'L' && e.shiftKey) {
         const c = commentsStore()
         c.setShowAnchor(!c.showAnchor)
-        toast(c.showAnchor ? 'laser comment off' : 'laser comment on')
+        toast(c.showAnchor ? t('laser comment off') : t('laser comment on'))
       }
       // I = copy the selected frame as a 2x PNG · Shift+I = 4x (dev only; one frame at a time)
       if ((e.key === 'i' || e.key === 'I') && !PUBLISHED && !e.altKey && !e.repeat) { s.copyFrameImage(e.shiftKey ? 4 : 2); return }
@@ -694,8 +698,8 @@ export function App() {
         if (paths.length) {
           // pulse the toolbar icon into a check ONLY on a real copy success
           navigator.clipboard.writeText(paths.join('\n')).then(
-            () => { toast(paths.length > 1 ? `${paths.length} paths copied` : 'path copied'); s.pulsePath() },
-            () => toast('copy blocked - click the canvas first'))
+            () => { toast(paths.length > 1 ? t('{{count}} paths copied', { count: paths.length }) : t('path copied')); s.pulsePath() },
+            () => toast(t('copy blocked - click the canvas first')))
         }
       }
       if (e.key === 'd' && CONFIG.themes.length > 1) {
@@ -773,7 +777,7 @@ export function App() {
     return (
       <div ref={appRef} tabIndex={-1} className={`sh-app${dark ? ' dark' : ''}`}>
         <PlayOverlay />
-        <div className="sh-toasts">{toasts.map((t) => <div className="sh-toast" key={t.id}>{t.text}</div>)}</div>
+        <div className="sh-toasts">{toasts.map((toastEntry) => <div className="sh-toast" key={toastEntry.id}>{toastEntry.text}</div>)}</div>
       </div>
     )
   }
@@ -795,11 +799,11 @@ export function App() {
               </a>
             </Tip>
             <span className="name" title={CONFIG.projectName || 'Marver'}>{CONFIG.projectName ? humanize(CONFIG.projectName) : 'Marver'}</span>
-            <Tip side="bottom" label={<><b>Collapse panel</b><span>⌘\</span></>}><button className="sh-ibtn" onClick={togglePanel} tabIndex={panelOpen ? 0 : -1}><PanelFilledIcon size={17} /></button></Tip>
+            <Tip side="bottom" label={<><b>{t('Collapse panel')}</b><span>⌘\</span></>}><button className="sh-ibtn" onClick={togglePanel} tabIndex={panelOpen ? 0 : -1}><PanelFilledIcon size={17} /></button></Tip>
           </div>
           <div className="sh-panel-scroll">
             <BoardList onMenu={cm.open} />
-            <div className="hd" style={{ marginTop: 10 }}>Scenes</div>
+            <div className="hd" style={{ marginTop: 10 }}>{t('Scenes')}</div>
             {scenes.map((sc) => (
               <SceneGroup key={sc.name} name={sc.name} label={sceneLabel(sc.name)} count={sc.frames}
                 held={frames.some((f) => f.scene === sc.name && selFrames.has(f.id))}
@@ -808,17 +812,17 @@ export function App() {
                   setSceneNaming(null)
                   const title = raw === null ? undefined : readTitle(raw)
                   if (!title || title === sceneLabel(sc.name)) return                    // Escape, empty, or unchanged = never mind
-                  if (scenes.some((o) => o.name !== sc.name && sceneLabel(o.name) === title)) { toast(`a scene called "${title}" already exists`); return }
+                  if (scenes.some((o) => o.name !== sc.name && sceneLabel(o.name) === title)) { toast(t('a scene called "{{title}}" already exists', { title })); return }
                   // typing what the directory reads as anyway clears the title - the brief stays clean
-                  useStore.getState().renameScene(sc.name, title === slugLabel(sc.name) ? '' : title).then((r) => { if (!r.ok) toast(r.error ?? 'rename failed') })
+                  useStore.getState().renameScene(sc.name, title === slugLabel(sc.name) ? '' : title).then((r) => { if (!r.ok) toast(t(r.error ?? 'rename failed')) })
                 }}
                 onContextMenu={(e) => cm.open(e, [{
-                  label: 'Copy path',
+                  label: t('Copy path'),
                   icon: <SignpostIcon size={15} />,
                   onClick: () => copyToClipboard(sc.name
-                    ? `board: ${useStore.getState().board} · scene: ${sc.name}  (design/scenes/${sc.name}/)`
-                    : `board: ${useStore.getState().board} · scene: (root)`, 'path copied'),
-                }, ...(!PUBLISHED && sc.name ? [{ label: 'Rename', icon: <PencilSimpleIcon size={15} />, onClick: () => setSceneNaming(sc.name) }] : [])])}
+                    ? t('board: {{board}} · scene: {{scene}}  (design/scenes/{{scene}}/)', { board: useStore.getState().board, scene: sc.name })
+                    : t('board: {{board}} · scene: (root)', { board: useStore.getState().board }), t('path copied')),
+                }, ...(!PUBLISHED && sc.name ? [{ label: t('Rename'), icon: <PencilSimpleIcon size={15} />, onClick: () => setSceneNaming(sc.name) }] : [])])}
                 onPick={() => {
                   const keys = nodes.filter((n) => frames.some((f) => f.scene === sc.name && f.id === n.frame) && !n.missing).map((n) => n.key)
                   if (!keys.length) return
@@ -852,7 +856,7 @@ export function App() {
                     if (!shift) canvasCtl.fitNode(n.key)
                   }
                   const frameMenu = (fr: FrameEntry): MenuItem[] => [
-                    { label: 'Copy path', icon: <SignpostIcon size={15} />, onClick: () => copyToClipboard(framePath(useStore.getState().board, fr), 'path copied') },
+                    { label: t('Copy path'), icon: <SignpostIcon size={15} />, onClick: () => copyToClipboard(framePath(useStore.getState().board, fr), t('path copied')) },
                   ]
                   const seen = new Set<string>()
                   const rows: ReactNode[] = []
@@ -862,7 +866,7 @@ export function App() {
                       const members = sceneFrames.filter((m) => m.variantGroup === f.variantGroup)
                         .sort((a, b) => (a.variant ?? '').localeCompare(b.variant ?? ''))
                       if (members.length > 1) {
-                        const rel = f.variantGroup === sc.name ? 'Variants'
+                        const rel = f.variantGroup === sc.name ? t('Variants')
                           : cap(f.variantGroup.slice(sc.name.length + 1).replace(/-/g, ' '))
                         const memberKeys = members.map((m) => nodeFor(m.id)?.key).filter((k): k is string => !!k)
                         const allOn = memberKeys.length > 0 && memberKeys.every((k) => selection.includes(k))
@@ -874,7 +878,7 @@ export function App() {
                         // identity; members carry their letter chips, indented below it
                         rows.push(
                           <div key={`g:${f.variantGroup}`} className={`sub vgroup${allOn ? ' on' : ''}${held ? ' held' : ''}`}
-                            title="Select all variants"
+                            title={t('Select all variants')}
                             onClick={() => { useStore.getState().selectMany(memberKeys); canvasCtl.fitNodes(memberKeys) }}>
                             <VariantsIcon size={13} className="iicon" />
                             <span className="glabel">{rel}</span>
@@ -903,7 +907,7 @@ export function App() {
                             frame is a deck frame whatever it imports), intent glyph for
                             content frames, the plain rectangle for UI frames */}
                         {f.slide
-                          ? <SlideFrameIcon size={13} className="iicon" role="img" aria-hidden={false} aria-label="slide" />
+                          ? <SlideFrameIcon size={13} className="iicon" role="img" aria-hidden={false} aria-label={t('slide')} />
                           : f.intent
                             ? <IntentGlyph intent={f.intent} size={13} className="iicon" aria-label={f.intent} />
                             : <FrameRectIcon size={13} className="iicon" />}
@@ -915,10 +919,10 @@ export function App() {
                 })()}
               </SceneGroup>
             ))}
-            {frames.length === 0 && <div className="sub dim">no frames yet - ask your agent<br />(design/AGENTS.md)</div>}
+            {frames.length === 0 && <div className="sub dim">{t('no frames yet - ask your agent')}<br />(design/AGENTS.md)</div>}
           </div>
       </aside>
-      <Tip side="bottom" label={<><b>Open panel</b><span>⌘\</span></>}>
+      <Tip side="bottom" label={<><b>{t('Open panel')}</b><span>⌘\</span></>}>
         <button className={`sh-fab${panelOpen ? ' hidden' : ''}`} onClick={togglePanel}
           aria-hidden={panelOpen} tabIndex={panelOpen ? -1 : 0}><PanelHollowIcon size={18} /></button>
       </Tip>
@@ -928,7 +932,7 @@ export function App() {
         {/* far-left section: actions - comment mode, laser, tidy */}
         <CommentButton />
         <LaserButton />
-        <Tip side="bottom" label={<><b>Tidy layout</b><span>T</span></>}>
+        <Tip side="bottom" label={<><b>{t('Tidy layout')}</b><span>T</span></>}>
           <button className="sh-pill-btn" onClick={() => { animateLayout(); runTidy() }}><ColumnsIcon size={16} /></button>
         </Tip>
         <i className="sep" />
@@ -938,17 +942,17 @@ export function App() {
         <ZoomMenu />
         <i className="sep" />
         {/* far right: view management - prototype, hide, collapse */}
-        <Tip side="bottom" label={<><b>Prototype view</b><span>P</span></>}>
+        <Tip side="bottom" label={<><b>{t('Prototype view')}</b><span>P</span></>}>
           <button className="sh-pill-btn" onClick={() => (playsAsSlides(useStore.getState().board) ? enterSlides() : enterPlay())}><PlayIcon size={15} /></button>
         </Tip>
         <HideUIButton />
-        <Tip side="bottom" label={<><b>Collapse toolbar</b><span>⌘/</span></>}>
+        <Tip side="bottom" label={<><b>{t('Collapse toolbar')}</b><span>⌘/</span></>}>
           <button className="sh-pill-btn" onClick={() => setPillOpen(false)} tabIndex={pillOpen ? 0 : -1}>
             <PanelFilledIcon size={17} style={{ transform: 'rotate(90deg)' }} />
           </button>
         </Tip>
       </nav>
-      <Tip side="bottom" label={<><b>Open toolbar</b><span>⌘/</span></>}>
+      <Tip side="bottom" label={<><b>{t('Open toolbar')}</b><span>⌘/</span></>}>
         <button className={`sh-pill-fab${pillOpen ? ' hidden' : ''}`} onClick={() => setPillOpen(true)}
           aria-hidden={pillOpen} tabIndex={pillOpen ? -1 : 0}><PanelHollowIcon size={18} style={{ transform: 'rotate(90deg)' }} /></button>
       </Tip>
@@ -958,8 +962,8 @@ export function App() {
       <ContextMenu menu={cm.menu} close={cm.close} />
 
       {CONFIG.setup
-        ? <div className="sh-banner">no app detected - designs would be built from nothing. See design/instructions/setup.md, then restart</div>
-        : CONFIG.noTheme && <div className="sh-banner">no theme configured - frames render unstyled. Create design/theme.css importing your app's stylesheet (or set theme in design/config.ts)</div>}
+        ? <div className="sh-banner">{t('no app detected - designs would be built from nothing. See design/instructions/setup.md, then restart')}</div>
+        : CONFIG.noTheme && <div className="sh-banner">{t("no theme configured - frames render unstyled. Create design/theme.css importing your app's stylesheet (or set theme in design/config.ts)")}</div>}
       <UpdatePill />
 
       <JamToasts toasts={toasts} />
@@ -973,33 +977,33 @@ export function App() {
  *  +N badge - click to expand the full list (newest first, timestamps, Clear all). */
 function JamToasts({ toasts }: { toasts: import('./store.ts').Toast[] }) {
   const [expanded, setExpanded] = useState(false)
-  const plain = toasts.filter((t) => !t.jam)
-  const jams = toasts.filter((t) => t.jam)
+  const plain = toasts.filter((toastEntry) => !toastEntry.jam)
+  const jams = toasts.filter((toastEntry) => toastEntry.jam)
   useEffect(() => { if (jams.length <= 2) setExpanded(false) }, [jams.length])
   const deck = jams.length > 2 && !expanded
   const newest = jams[jams.length - 1]
   return (
     <div className="sh-toasts">
-      {plain.slice(-2).map((t) => <div key={t.id} className="sh-toast"><CheckIcon size={12} /> {t.text}</div>)}
+      {plain.slice(-2).map((toastEntry) => <div key={toastEntry.id} className="sh-toast"><CheckIcon size={12} /> {toastEntry.text}</div>)}
       {expanded && jams.length > 2 && (
         <div className="sh-jam-list">
           <div className="sh-jam-listhead">
-            <span>{jams.length} NOTIFICATIONS</span>
-            <button onClick={() => { useStore.getState().clearJamToasts(); setExpanded(false) }}>Clear all</button>
-            <button aria-label="Collapse" onClick={() => setExpanded(false)}><XIcon size={12} /></button>
+            <span>{t('{{count}} NOTIFICATIONS', { count: jams.length })}</span>
+            <button onClick={() => { useStore.getState().clearJamToasts(); setExpanded(false) }}>{t('Clear all')}</button>
+            <button aria-label={t('Collapse')} onClick={() => setExpanded(false)}><XIcon size={12} /></button>
           </div>
-          {[...jams].reverse().map((t) => <JamToast key={t.id} id={t.id} note={t.jam!} />)}
+          {[...jams].reverse().map((toastEntry) => <JamToast key={toastEntry.id} id={toastEntry.id} note={toastEntry.jam!} />)}
         </div>
       )}
       {!expanded && (deck
         ? (
-          <div className="sh-jam-deck" onClick={() => setExpanded(true)} role="button" aria-label={`${jams.length} notifications - expand`}>
+          <div className="sh-jam-deck" onClick={() => setExpanded(true)} role="button" aria-label={t('{{count}} notifications - expand', { count: jams.length })}>
             <div className="sh-jam-ghost g2" />
             <div className="sh-jam-ghost g1" />
             {newest?.jam && <JamToast id={newest.id} note={newest.jam} badge={jams.length - 1} inert />}
           </div>
         )
-        : jams.map((t) => <JamToast key={t.id} id={t.id} note={t.jam!} />))}
+        : jams.map((toastEntry) => <JamToast key={toastEntry.id} id={toastEntry.id} note={toastEntry.jam!} />))}
     </div>
   )
 }
@@ -1041,15 +1045,15 @@ function JamToast({ id, note, badge, inert }: { id: number; note: import('./stor
         : <span className="sh-jam-mark"><ParallelogramFillIcon size={17} /></span>}
       <div className="sh-jam-txt">
         {human
-          ? <b className="sh-jam-frame"><span className="t">{note.author!.name ?? 'Someone'}</span> <span className="v">{note.kind === 'mention' ? 'mentioned you' : 'replied'}</span></b>
+          ? <b className="sh-jam-frame"><span className="t">{note.author!.name ?? t('Someone')}</span> <span className="v">{note.kind === 'mention' ? t('mentioned you') : t('replied')}</span></b>
           : <b className="sh-jam-frame"><span className="t">{note.frameTitle ?? note.board}</span></b>}
         <span className="sh-jam-prev">{note.preview}</span>
       </div>
       {badge != null
         ? <span className="sh-jam-badge">+{badge}</span>
         : !inert && <>
-            <button className="sh-jam-view" onClick={() => void viewNote(note, dismiss)}>View</button>
-            <button className="sh-jam-x" aria-label="Dismiss" onClick={dismiss}><XIcon size={13} /></button>
+            <button className="sh-jam-view" onClick={() => void viewNote(note, dismiss)}>{t('View')}</button>
+            <button className="sh-jam-x" aria-label={t('Dismiss')} onClick={dismiss}><XIcon size={13} /></button>
           </>}
     </div>
   )
